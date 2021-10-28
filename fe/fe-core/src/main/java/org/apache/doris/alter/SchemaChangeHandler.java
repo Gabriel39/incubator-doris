@@ -810,7 +810,13 @@ public class SchemaChangeHandler extends AlterHandler {
             }
         }
         if (found) {
-            throw new DdlException("Can not add column which already exists in base table: " +  newColName);
+            if (newColName.equalsIgnoreCase(Column.DELETE_SIGN)) {
+                throw new DdlException("Can not enable batch delete support, already supported batch delete.");
+            } else if (newColName.equalsIgnoreCase(Column.SEQUENCE_COL)) {
+                throw new DdlException("Can not enable sequence column support, already supported sequence column.");
+            } else {
+                throw new DdlException("Can not add column which already exists in base table: " +  newColName);
+            }
         }
         
         /*
@@ -1221,7 +1227,7 @@ public class SchemaChangeHandler extends AlterHandler {
                     for (Column alterColumn : alterSchema) {
                         if (alterColumn.nameEquals(partitionCol.getName(), true)) {
                             // 2.1 partition column cannot be modified
-                            if (needAlterColumns.contains(alterColumn)) {
+                            if (needAlterColumns.contains(alterColumn) && !alterColumn.equals(partitionCol)) {
                                 throw new DdlException("Can not modify partition column["
                                         + partitionCol.getName() + "]. index["
                                         + olapTable.getIndexNameById(alterIndexId) + "]");
@@ -1250,7 +1256,7 @@ public class SchemaChangeHandler extends AlterHandler {
                     for (Column alterColumn : alterSchema) {
                         if (alterColumn.nameEquals(distributionCol.getName(), true)) {
                             // 3.1 distribution column cannot be modified
-                            if (needAlterColumns.contains(alterColumn)) {
+                            if (needAlterColumns.contains(alterColumn) && !alterColumn.equals(distributionCol)) {
                                 throw new DdlException("Can not modify distribution column["
                                         + distributionCol.getName() + "]. index["
                                         + olapTable.getIndexNameById(alterIndexId) + "]");
