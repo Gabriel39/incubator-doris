@@ -55,21 +55,22 @@ public class QueryStmtTest {
                 + "AGGREGATE KEY(k1, k2,k3,k4) distributed by hash(k1) buckets 3 properties('replication_num' = '1');";
         String createBaseAllStmtStr = "create table db1.baseall(k1 int, k2 varchar(32)) distributed by hash(k1) "
                 + "buckets 3 properties('replication_num' = '1');";
-        String tbl1 = "CREATE TABLE db1.table1 (\n" +
-                "  `siteid` int(11) NULL DEFAULT \"10\" COMMENT \"\",\n" +
-                "  `citycode` smallint(6) NULL COMMENT \"\",\n" +
-                "  `username` varchar(32) NULL DEFAULT \"\" COMMENT \"\",\n" +
-                "  `workDateTime` datetime NOT NULL COMMENT \"\",\n" +
-                "  `pv` bigint(20) NULL DEFAULT \"0\" COMMENT \"\"\n" +
-                ") ENGINE=OLAP\n" +
-                "UNIQUE KEY(`siteid`, `citycode`, `username`)\n" +
-                "COMMENT \"OLAP\"\n" +
-                "DISTRIBUTED BY HASH(`siteid`) BUCKETS 10\n" +
-                "PROPERTIES (\n" +
-                "\"replication_num\" = \"1\",\n" +
-                "\"in_memory\" = \"false\",\n" +
-                "\"storage_format\" = \"V2\"\n" +
-                ")";
+        String tbl1 = "CREATE TABLE db1.table1 (\n"
+                + "  `siteid` int(11) NULL DEFAULT \"10\" COMMENT \"\",\n"
+                + "  `citycode` smallint(6) NULL COMMENT \"\",\n"
+                + "  `username` varchar(32) NULL DEFAULT \"\" COMMENT \"\",\n"
+                + "  `workDateTime` datetime NOT NULL COMMENT \"\",\n"
+                + "  `workDateTimeV2` datetime NOT NULL COMMENT \"\",\n"
+                + "  `pv` bigint(20) NULL DEFAULT \"0\" COMMENT \"\"\n"
+                + ") ENGINE=OLAP\n"
+                + "UNIQUE KEY(`siteid`, `citycode`, `username`)\n"
+                + "COMMENT \"OLAP\"\n"
+                + "DISTRIBUTED BY HASH(`siteid`) BUCKETS 10\n"
+                + "PROPERTIES (\n"
+                + "\"replication_num\" = \"1\",\n"
+                + "\"in_memory\" = \"false\",\n"
+                + "\"storage_format\" = \"V2\"\n"
+                + ")";
         dorisAssert = new DorisAssert();
         dorisAssert.withDatabase("db1").useDatabase("db1");
         dorisAssert.withTable(createTblStmtStr)
@@ -218,36 +219,41 @@ public class QueryStmtTest {
         Assert.assertEquals(1, constMap.size());
 
         // expr in subquery associate with column in grandparent level
-        sql = "WITH aa AS\n" +
-                "        (SELECT DATE_FORMAT(workDateTime, '%Y-%m') mon,\n" +
-                "                siteid\n" +
-                "                FROM db1.table1\n" +
-                "                WHERE workDateTime >= concat(year(now())-1, '-01-01 00:00:00')\n" +
-                "                AND workDateTime < now()\n" +
-                "                GROUP BY siteid,\n" +
-                "                DATE_FORMAT(workDateTime, '%Y-%m')),\n" +
-                "        bb AS\n" +
-                "        (SELECT mon,\n" +
-                "                count(DISTINCT siteid) total\n" +
-                "                FROM aa\n" +
-                "                GROUP BY mon),\n" +
-                "        cc AS\n" +
-                "        (SELECT mon,\n" +
-                "                count(DISTINCT siteid) num\n" +
-                "                FROM aa\n" +
-                "                GROUP BY mon)\n" +
-                "SELECT bb.mon,\n" +
-                "        round(cc.num / bb.total, 4) rate\n" +
-                "FROM bb\n" +
-                "LEFT JOIN cc ON cc.mon = bb.mon\n" +
-                "ORDER BY mon;";
+        sql = "WITH aa AS\n"
+                + "        (SELECT DATE_FORMAT(workDateTime, '%Y-%m') mon,\n"
+                + "                DATE_FORMAT(workDateTimeV2, '%Y-%m') mon1,\n"
+                + "                siteid\n"
+                + "                FROM db1.table1\n"
+                + "                WHERE workDateTime >= concat(year(now())-1, '-01-01 00:00:00')\n"
+                + "                AND workDateTimeV2 >= concat(year(now())-1, '-01-01 00:00:00')\n"
+                + "                AND workDateTimeV2 >= concat(year(now())-1, '-01-01 00:00:00.000000')\n"
+                + "                AND workDateTime < now()\n"
+                + "                AND workDateTimeV2 < now()\n"
+                + "                GROUP BY siteid,\n"
+                + "                DATE_FORMAT(workDateTime, '%Y-%m'),\n"
+                + "                DATE_FORMAT(workDateTimeV2, '%Y-%m')),\n"
+                + "        bb AS\n"
+                + "        (SELECT mon,\n"
+                + "                count(DISTINCT siteid) total\n"
+                + "                FROM aa\n"
+                + "                GROUP BY mon),\n"
+                + "        cc AS\n"
+                + "        (SELECT mon,\n"
+                + "                 count(DISTINCT siteid) num\n"
+                + "                FROM aa\n"
+                + "                GROUP BY mon)\n"
+                + "SELECT bb.mon,\n"
+                + "        round(cc.num / bb.total, 4) rate\n"
+                + "FROM bb\n"
+                + "LEFT JOIN cc ON cc.mon = bb.mon\n"
+                + "ORDER BY mon;";
         stmt = (QueryStmt) UtFrameUtils.parseAndAnalyzeStmt(sql, ctx);
         exprsMap.clear();
         stmt.collectExprs(exprsMap);
-        Assert.assertEquals(18, exprsMap.size());
+        Assert.assertEquals(24, exprsMap.size());
         constMap.clear();
         constMap = getConstantExprMap(exprsMap, analyzer);
-        Assert.assertEquals(4, constMap.size());
+        Assert.assertEquals(10, constMap.size());
     }
 
     @Test

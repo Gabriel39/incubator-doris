@@ -139,8 +139,7 @@ public class CastExpr extends Expr {
     private static boolean disableRegisterCastingFunction(Type fromType, Type toType) {
         // Disable casting from boolean to decimal or datetime or date
         if (fromType.isBoolean() &&
-                (toType.equals(Type.DECIMALV2) ||
-                        toType.equals(Type.DATETIME) || toType.equals(Type.DATE))) {
+                (toType.equals(Type.DECIMALV2) || toType.isDateType())) {
             return true;
         }
 
@@ -166,14 +165,16 @@ public class CastExpr extends Expr {
                     beClass = "TimeOperators";
                 }
                 String typeName = Function.getUdfTypeName(toType.getPrimitiveType());
-                if (toType.getPrimitiveType() == PrimitiveType.DATE) {
+                // only refactor date/datetime for vectorized engine.
+                if (toType.getPrimitiveType() == PrimitiveType.DATE
+                        || toType.getPrimitiveType() == PrimitiveType.DATEV2) {
                     typeName = "date_val";
                 }
                 String beSymbol = "doris::" + beClass + "::cast_to_"
                         + typeName;
                 functionSet.addBuiltinBothScalaAndVectorized(ScalarFunction.createBuiltin(getFnName(toType),
                         toType, TYPE_NULLABLE_MODE.get(new Pair<>(fromType, toType)),
-                        Lists.newArrayList(fromType), false ,
+                        Lists.newArrayList(fromType), false,
                         beSymbol, null, null, true));
             }
         }
@@ -207,11 +208,11 @@ public class CastExpr extends Expr {
 
     @Override
     public String toDigestImpl() {
-        boolean isVerbose = ConnectContext.get() != null &&
-                ConnectContext.get().getExecutor() != null &&
-                ConnectContext.get().getExecutor().getParsedStmt() != null &&
-                ConnectContext.get().getExecutor().getParsedStmt().getExplainOptions() != null &&
-                ConnectContext.get().getExecutor().getParsedStmt().getExplainOptions().isVerbose();
+        boolean isVerbose = ConnectContext.get() != null
+                && ConnectContext.get().getExecutor() != null
+                && ConnectContext.get().getExecutor().getParsedStmt() != null
+                && ConnectContext.get().getExecutor().getParsedStmt().getExplainOptions() != null
+                && ConnectContext.get().getExecutor().getParsedStmt().getExplainOptions().isVerbose();
         if (isImplicit && !isVerbose) {
             return getChild(0).toDigest();
         }
@@ -278,10 +279,10 @@ public class CastExpr extends Expr {
                 fn = Catalog.getCurrentCatalog().getFunction(
                         searchDesc, Function.CompareMode.IS_IDENTICAL);
             }
-        } else if (type.isArrayType()){
+        } else if (type.isArrayType()) {
             fn = ScalarFunction.createBuiltin(getFnName(Type.ARRAY),
                     type, Function.NullableMode.ALWAYS_NULLABLE,
-                    Lists.newArrayList(Type.VARCHAR), false ,
+                    Lists.newArrayList(Type.VARCHAR), false,
                     "doris::CastFunctions::cast_to_array_val", null, null, true);
         }
 
@@ -361,7 +362,7 @@ public class CastExpr extends Expr {
         }
         Expr targetExpr;
         try {
-            targetExpr = castTo((LiteralExpr)value);
+            targetExpr = castTo((LiteralExpr) value);
         } catch (AnalysisException ae) {
             targetExpr = this;
         } catch (NumberFormatException nfe) {
@@ -501,8 +502,8 @@ public class CastExpr extends Expr {
 
     @Override
     public boolean isNullable() {
-        return children.get(0).isNullable() ||
-                (children.get(0).getType().isStringType() && !getType().isStringType()) ||
-                (!children.get(0).getType().isDateType() && getType().isDateType());
+        return children.get(0).isNullable()
+                || (children.get(0).getType().isStringType() && !getType().isStringType())
+                || (!children.get(0).getType().isDateType() && getType().isDateType());
     }
 }

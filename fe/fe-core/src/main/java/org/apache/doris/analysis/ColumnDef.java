@@ -270,10 +270,10 @@ public class ColumnDef {
             case SMALLINT:
             case INT:
             case BIGINT:
-                IntLiteral intLiteral = new IntLiteral(defaultValue, type);
+                new IntLiteral(defaultValue, type);
                 break;
             case LARGEINT:
-                LargeIntLiteral largeIntLiteral = new LargeIntLiteral(defaultValue);
+                new LargeIntLiteral(defaultValue);
                 break;
             case FLOAT:
                 FloatLiteral floatLiteral = new FloatLiteral(defaultValue);
@@ -282,7 +282,7 @@ public class ColumnDef {
                 }
                 break;
             case DOUBLE:
-                FloatLiteral doubleLiteral = new FloatLiteral(defaultValue);
+                new FloatLiteral(defaultValue);
                 break;
             case DECIMALV2:
                 DecimalLiteral decimalLiteral = new DecimalLiteral(defaultValue);
@@ -290,7 +290,9 @@ public class ColumnDef {
                 break;
             case DATE:
             case DATETIME:
-                DateLiteral dateLiteral = new DateLiteral(defaultValue, type);
+            case DATEV2:
+            case DATETIMEV2:
+                new DateLiteral(defaultValue, DateLiteral.getDefaultDateType(type));
                 break;
             case CHAR:
             case VARCHAR:
@@ -301,15 +303,12 @@ public class ColumnDef {
                 }
                 break;
             case BITMAP:
-                break;
             case ARRAY:
-                break;
             case MAP:
-                break;
             case STRUCT:
                 break;
             case BOOLEAN:
-                BoolLiteral boolLiteral = new BoolLiteral(defaultValue);
+                new BoolLiteral(defaultValue);
                 break;
             default:
                 throw new AnalysisException("Unsupported type: " + type);
