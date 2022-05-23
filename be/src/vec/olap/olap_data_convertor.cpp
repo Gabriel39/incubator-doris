@@ -53,6 +53,11 @@ OlapBlockDataConvertor::OlapBlockDataConvertor(const TabletSchema* tablet_schema
             _convertors.emplace_back(std::make_shared<OlapColumnDataConvertorDate>());
             break;
         }
+        case FieldType::OLAP_FIELD_TYPE_DATEV2: {
+            _convertors.emplace_back(
+                    std::make_shared<OlapColumnDataConvertorSimple<vectorized::UInt32> >());
+            break;
+        }
         case FieldType::OLAP_FIELD_TYPE_DATETIME: {
             _convertors.emplace_back(std::make_shared<OlapColumnDataConvertorDateTime>());
             break;
