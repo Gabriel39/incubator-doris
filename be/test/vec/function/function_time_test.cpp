@@ -1019,4 +1019,99 @@ TEST(VTimestampFunctionsTest, yearweek_v2_test) {
 
     check_function<DataTypeInt32, true>(func_name, new_input_types, new_data_set);
 }
+
+TEST(VTimestampFunctionsTest, makedate_v2_test) {
+    std::string func_name = "makedate";
+
+    InputTypeSet input_types = {TypeIndex::Int32, TypeIndex::Int32};
+
+    DataSet data_set = {{{2021, 3}, str_to_date_v2("2021-01-03", "%Y-%m-%d")},
+                        {{2021, 95}, str_to_date_v2("2021-04-05", "%Y-%m-%d")},
+                        {{2021, 400}, str_to_date_v2("2022-02-04", "%Y-%m-%d")},
+                        {{2021, 0}, Null()},
+                        {{2021, -10}, Null()},
+                        {{-1, 3}, Null()},
+                        {{12345, 3}, Null()}};
+
+    check_function<DataTypeDateV2, true>(func_name, input_types, data_set);
+}
+
+TEST(VTimestampFunctionsTest, str_to_date_test) {
+    std::string func_name = "str_to_date";
+
+    InputTypeSet input_types = {TypeIndex::String, TypeIndex::String};
+
+    {
+        DataSet data_set = {{{std::string("2021-01-01"), std::string("%Y-%m-%d")},
+                             str_to_date_time("2021-01-03", false)},
+                            {{std::string("2022-01-01"), std::string("%Y-%m-%d")},
+                             str_to_date_time("2022-01-03", false)},
+                            {{std::string("2021-00-01"), std::string("%Y-%m-%d")}, Null()},
+                            {{std::string("2021-01-00"), std::string("%Y-%m-%d")}, Null()},
+                            {{std::string("999-01-01"), std::string("%Y-%m-%d")}, Null()}};
+
+        check_function<DataTypeDate, true>(func_name, input_types, data_set);
+    }
+    {
+        DataSet data_set = {{{std::string("2021-01-01"), std::string("%Y-%m-%d")},
+                             str_to_date_v2("2021-01-03", "%Y-%m-%d")},
+                            {{std::string("2022-01-01"), std::string("%Y-%m-%d")},
+                             str_to_date_v2("2022-01-03", "%Y-%m-%d")},
+                            {{std::string("2021-00-01"), std::string("%Y-%m-%d")}, Null()},
+                            {{std::string("2021-01-00"), std::string("%Y-%m-%d")}, Null()},
+                            {{std::string("999-01-01"), std::string("%Y-%m-%d")}, Null()}};
+
+        check_function<DataTypeDateV2, true>(func_name, input_types, data_set);
+    }
+}
+
+TEST(VTimestampFunctionsTest, from_days_test) {
+    std::string func_name = "from_days";
+
+    InputTypeSet input_types = {TypeIndex::Int32};
+
+    {
+        DataSet data_set = {{{730669}, str_to_date_time("2000-07-03", false)}, {{0}, Null()}};
+
+        check_function<DataTypeDate, true>(func_name, input_types, data_set);
+    }
+    {
+        DataSet data_set = {{{730669}, str_to_date_v2("2021-01-03", "%Y-%m-%d")}, {{0}, Null()}};
+
+        check_function<DataTypeDateV2, true>(func_name, input_types, data_set);
+    }
+}
+
+TEST(VTimestampFunctionsTest, unix_timestamp_datetime_test) {
+    std::string func_name = "unix_timestamp";
+
+    InputTypeSet input_types = {TypeIndex::DateTime};
+
+    DataSet data_set = {{{std::string("2007-11-30 10:30:19")}, 1196389819},
+                        {{std::string("2007-00-30 10:30:19")}, Null()},
+                        {{std::string("2007-10-32 10:30:19")}, Null()}};
+
+    check_function<DataTypeInt32, true>(func_name, input_types, data_set);
+}
+
+TEST(VTimestampFunctionsTest, unix_timestamp_date_test) {
+    std::string func_name = "unix_timestamp";
+
+    {
+        InputTypeSet input_types = {TypeIndex::Date};
+        DataSet data_set = {{{std::string("2007-11-30")}, 1196389819},
+                            {{std::string("2007-00-30")}, Null()},
+                            {{std::string("2007-10-32")}, Null()}};
+
+        check_function<DataTypeInt32, true>(func_name, input_types, data_set);
+    }
+    {
+        InputTypeSet input_types = {TypeIndex::DateV2};
+        DataSet data_set = {{{std::string("2007-11-30")}, 1196389819},
+                            {{std::string("2007-00-30")}, Null()},
+                            {{std::string("2007-10-32")}, Null()}};
+
+        check_function<DataTypeInt32, true>(func_name, input_types, data_set);
+    }
+}
 } // namespace doris::vectorized

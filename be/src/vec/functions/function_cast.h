@@ -688,12 +688,12 @@ struct FunctionTo<DataTypeDate> {
     using Type = FunctionToDate;
 };
 template <>
-struct FunctionTo<DataTypeDateTime> {
-    using Type = FunctionToDateTime;
-};
-template <>
 struct FunctionTo<DataTypeDateV2> {
     using Type = FunctionToDateV2;
+};
+template <>
+struct FunctionTo<DataTypeDateTime> {
+    using Type = FunctionToDateTime;
 };
 
 class PreparedFunctionCast : public PreparedFunctionImpl {
@@ -985,8 +985,7 @@ private:
         } else if (requested_result_is_nullable &&
                    (IsTimeType<DataType> || IsDateV2Type<DataType>)&&!(
                            check_and_get_data_type<DataTypeDateTime>(from_type.get()) ||
-                           check_and_get_data_type<DataTypeDate>(from_type.get()) ||
-                           check_and_get_data_type<DataTypeDateV2>(from_type.get()))) {
+                           check_and_get_data_type<DataTypeDate>(from_type.get()))) {
             function = FunctionConvertToTimeType<DataType, NameCast>::create();
         } else {
             function = FunctionTo<DataType>::Type::create();
