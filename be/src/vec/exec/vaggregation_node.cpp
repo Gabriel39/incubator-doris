@@ -908,22 +908,11 @@ Status AggregationNode::_get_with_serialized_key_result(RuntimeState* state, Blo
             _agg_data._aggregated_method_variant);
 
     for (int i = 0; i < key_size; ++i) {
-        if (key_columns[i]->is_nullable() xor temp_key_columns[i]->is_nullable()) {
-            DCHECK(key_columns[i]->is_nullable() && !temp_key_columns[i]->is_nullable());
-            key_columns[i] = (*std::move(make_nullable(std::move(temp_key_columns[i])))).mutate();
-        } else {
-            key_columns[i] = std::move(temp_key_columns[i]);
-        }
+        key_columns[i] = std::move(temp_key_columns[i]);
     }
 
     for (int i = 0; i < _aggregate_evaluators.size(); ++i) {
-        if (value_columns[i]->is_nullable() xor temp_value_columns[i]->is_nullable()) {
-            DCHECK(value_columns[i]->is_nullable() && !temp_value_columns[i]->is_nullable());
-            value_columns[i] =
-                    (*std::move(make_nullable(std::move(temp_value_columns[i])))).mutate();
-        } else {
-            value_columns[i] = std::move(temp_value_columns[i]);
-        }
+        value_columns[i] = std::move(temp_value_columns[i]);
     }
 
     if (!mem_reuse) {
