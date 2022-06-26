@@ -843,28 +843,25 @@ Status AggregationNode::_get_with_serialized_key_result(RuntimeState* state, Blo
     auto column_withschema = VectorizedUtils::create_columns_with_type_and_name(row_desc());
     int key_size = _probe_expr_ctxs.size();
 
-    MutableColumns key_columns;
+    MutableColumns temp_key_columns;
+
     for (int i = 0; i < key_size; ++i) {
         if (!mem_reuse) {
-            key_columns.emplace_back(column_withschema[i].type->create_column());
+            temp_key_columns = _create_temp_key_columns();
         } else {
-            key_columns.emplace_back(std::move(*block->get_by_position(i).column).mutate());
+            temp_key_columns.emplace_back(std::move(*block->get_by_position(i).column).mutate());
         }
     }
-
-    MutableColumns temp_key_columns = _create_temp_key_columns();
     DCHECK(temp_key_columns.size() == key_size);
 
-    MutableColumns value_columns;
+    MutableColumns temp_value_columns;
     for (int i = key_size; i < column_withschema.size(); ++i) {
         if (!mem_reuse) {
-            value_columns.emplace_back(column_withschema[i].type->create_column());
+            temp_value_columns = _create_temp_value_columns();
         } else {
-            value_columns.emplace_back(std::move(*block->get_by_position(i).column).mutate());
+            temp_value_columns.emplace_back(std::move(*block->get_by_position(i).column).mutate());
         }
     }
-
-    MutableColumns temp_value_columns = _create_temp_value_columns();
     DCHECK(temp_value_columns.size() == _aggregate_evaluators.size() &&
            _aggregate_evaluators.size() == column_withschema.size() - key_size);
 
@@ -907,22 +904,14 @@ Status AggregationNode::_get_with_serialized_key_result(RuntimeState* state, Blo
             },
             _agg_data._aggregated_method_variant);
 
-    for (int i = 0; i < key_size; ++i) {
-        key_columns[i] = std::move(temp_key_columns[i]);
-    }
-
-    for (int i = 0; i < _aggregate_evaluators.size(); ++i) {
-        value_columns[i] = std::move(temp_value_columns[i]);
-    }
-
     if (!mem_reuse) {
         *block = column_withschema;
         MutableColumns columns(block->columns());
         for (int i = 0; i < block->columns(); ++i) {
             if (i < key_size) {
-                columns[i] = std::move(key_columns[i]);
+                columns[i] = std::move(temp_key_columns[i]);
             } else {
-                columns[i] = std::move(value_columns[i - key_size]);
+                columns[i] = std::move(temp_value_columns[i - key_size]);
             }
         }
         block->set_columns(std::move(columns));
