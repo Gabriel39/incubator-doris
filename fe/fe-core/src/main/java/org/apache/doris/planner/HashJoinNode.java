@@ -56,6 +56,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -370,13 +371,24 @@ public class HashJoinNode extends PlanNode {
                     if (!isMaterailizedByChild(leftSlotDesc, getChild(0).getOutputSmap())) {
                         continue;
                     }
-                    SlotDescriptor outputSlotDesc =
-                            analyzer.getDescTbl().copySlotDescriptor(vOutputTupleDesc, leftSlotDesc);
+                    SlotRef leftSlotRef = new SlotRef(leftSlotDesc);
+
+                    SlotDescriptor outputSlotDesc = null;
+                    if (outputSmap.containsMappingFor(leftSlotRef)) {
+                        outputSlotDesc =
+                                analyzer.getDescTbl().copySlotDescriptor(vOutputTupleDesc, ((SlotRef) Objects.requireNonNull(
+                                        outputSmap.get(leftSlotRef))).getDesc());
+                        analyzer.putEquivalentSlot(leftSlotRef.getSlotId(), ((SlotRef) Objects.requireNonNull(
+                                outputSmap.get(leftSlotRef))).getDesc().getId());
+                    } else {
+                        outputSlotDesc =
+                                analyzer.getDescTbl().copySlotDescriptor(vOutputTupleDesc, leftSlotDesc);
+                    }
                     if (leftNullable) {
                         outputSlotDesc.setIsNullable(true);
                         leftNullableNumber++;
                     }
-                    srcTblRefToOutputTupleSmap.put(new SlotRef(leftSlotDesc), new SlotRef(outputSlotDesc));
+                    srcTblRefToOutputTupleSmap.put(leftSlotRef, new SlotRef(outputSlotDesc));
                 }
             }
         }
@@ -387,13 +399,25 @@ public class HashJoinNode extends PlanNode {
                     if (!isMaterailizedByChild(rightSlotDesc, getChild(1).getOutputSmap())) {
                         continue;
                     }
-                    SlotDescriptor outputSlotDesc =
-                            analyzer.getDescTbl().copySlotDescriptor(vOutputTupleDesc, rightSlotDesc);
+                    SlotRef rightSlotRef = new SlotRef(rightSlotDesc);
+
+                    SlotDescriptor outputSlotDesc = null;
+                    if (outputSmap.containsMappingFor(rightSlotRef)) {
+                        outputSlotDesc =
+                                analyzer.getDescTbl().copySlotDescriptor(vOutputTupleDesc, ((SlotRef) Objects.requireNonNull(
+                                        outputSmap.get(rightSlotRef))).getDesc());
+                        analyzer.putEquivalentSlot(rightSlotRef.getSlotId(), ((SlotRef) Objects.requireNonNull(
+                                outputSmap.get(rightSlotRef))).getDesc().getId());
+                    } else {
+                        outputSlotDesc =
+                                analyzer.getDescTbl().copySlotDescriptor(vOutputTupleDesc, rightSlotDesc);
+                    }
+
                     if (rightNullable) {
                         outputSlotDesc.setIsNullable(true);
                         rightNullableNumber++;
                     }
-                    srcTblRefToOutputTupleSmap.put(new SlotRef(rightSlotDesc), new SlotRef(outputSlotDesc));
+                    srcTblRefToOutputTupleSmap.put(rightSlotRef, new SlotRef(outputSlotDesc));
                 }
             }
         }
