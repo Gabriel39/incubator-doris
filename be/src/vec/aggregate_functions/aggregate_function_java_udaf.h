@@ -339,7 +339,7 @@ public:
     }
 
     void add_batch(size_t batch_size, AggregateDataPtr* places, size_t place_offset,
-                   const IColumn** columns, Arena* arena) const override {
+                   const IColumn** columns, Arena* arena) override {
         int64_t places_address[batch_size];
         for (size_t i = 0; i < batch_size; ++i) {
             places_address[i] = reinterpret_cast<int64_t>(places[i]);
@@ -350,7 +350,7 @@ public:
     // TODO: Here we calling method by jni, And if we get a thrown from FE,
     // But can't let user known the error, only return directly and output error to log file.
     void add_batch_single_place(size_t batch_size, AggregateDataPtr place, const IColumn** columns,
-                                Arena* arena) const override {
+                                Arena* arena) override {
         int64_t places_address[1];
         places_address[0] = reinterpret_cast<int64_t>(place);
         this->data(_exec_place).add(places_address, true, columns, 0, batch_size, argument_types);

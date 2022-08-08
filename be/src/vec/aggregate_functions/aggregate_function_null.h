@@ -210,7 +210,7 @@ public:
     }
 
     void add_batch_single_place(size_t batch_size, AggregateDataPtr place, const IColumn** columns,
-                                Arena* arena) const override {
+                                Arena* arena) override {
         const ColumnNullable* column = assert_cast<const ColumnNullable*>(columns[0]);
         bool has_null = column->has_null();
 
@@ -298,6 +298,55 @@ public:
 
         this->set_flag(place);
         this->nested_function->add(this->nested_place(place), nested_columns, row_num, arena);
+    }
+
+    void add_batch(size_t batch_size, AggregateDataPtr* places, size_t place_offset,
+                   const IColumn** columns, Arena* arena) override {
+        /// This container stores the columns we really pass to the nested function.
+        const IColumn* nested_columns[number_of_arguments];
+        for (size_t i = 0; i < batch_size; ++i) {
+            for (size_t j = 0; j < number_of_arguments; ++j) {
+                if (is_nullable[j]) {
+                    const ColumnNullable& nullable_col =
+                            assert_cast<const ColumnNullable&>(*columns[j]);
+                    if (nullable_col.is_null_at(i)) {
+                        /// If at least one column has a null value in the current row,
+                        /// we don't process this row.
+                        return;
+                    }
+                    nested_columns[j] = &nullable_col.get_nested_column();
+                } else {
+                    nested_columns[j] = columns[j];
+                }
+            }
+
+            this->set_flag(places[i] + place_offset);
+        }
+        this->nested_function->add_batch(batch_size, places, place_offset, nested_columns, arena);
+    }
+
+    void add_batch_single_place(size_t batch_size, AggregateDataPtr place, const IColumn** columns,
+                                Arena* arena) override {
+        const IColumn* nested_columns[number_of_arguments];
+        for (size_t i = 0; i < batch_size; ++i) {
+            for (size_t j = 0; j < number_of_arguments; ++j) {
+                if (is_nullable[j]) {
+                    const ColumnNullable& nullable_col =
+                            assert_cast<const ColumnNullable&>(*columns[j]);
+                    if (nullable_col.is_null_at(i)) {
+                        /// If at least one column has a null value in the current row,
+                        /// we don't process this row.
+                        return;
+                    }
+                    nested_columns[j] = &nullable_col.get_nested_column();
+                } else {
+                    nested_columns[j] = columns[j];
+                }
+            }
+
+            this->set_flag(place);
+        }
+        this->nested_function->add_batch_single_place(batch_size, place, nested_columns, arena);
     }
 
     bool allocates_memory_in_arena() const override {

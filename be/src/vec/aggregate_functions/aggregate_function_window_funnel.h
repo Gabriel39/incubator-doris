@@ -24,8 +24,10 @@
 #include "common/logging.h"
 #include "vec/aggregate_functions/aggregate_function.h"
 #include "vec/columns/columns_number.h"
+#include "vec/common/arena.h"
 #include "vec/data_types/data_type_decimal.h"
 #include "vec/io/var_int.h"
+#include "vec/runtime/vdatetime_value.h"
 
 namespace doris::vectorized {
 
@@ -179,20 +181,98 @@ public:
 
     void add(AggregateDataPtr __restrict place, const IColumn** columns, size_t row_num,
              Arena*) const override {
-        const auto& window =
-                static_cast<const ColumnVector<Int64>&>(*columns[0]).get_data()[row_num];
-        // TODO: handle mode in the future.
-        // be/src/olap/row_block2.cpp copy_data_to_column
-        const auto& timestamp =
-                static_cast<const ColumnVector<NativeType>&>(*columns[2]).get_data()[row_num];
-        const int NON_EVENT_NUM = 3;
+        LOG(FATAL) << "'add' is not supported in AggregateFunctionWindowFunnel";
+    }
+
+    void add_batch(size_t batch_size, AggregateDataPtr* places, size_t place_offset,
+                   const IColumn** columns, Arena* arena) override {
+        constexpr int NON_EVENT_NUM = 3;
+        size_t max_one_row_byte_size =
+                columns[0]->get_max_row_byte_size() + columns[2]->get_max_row_byte_size();
         for (int i = NON_EVENT_NUM; i < IAggregateFunction::get_argument_types().size(); i++) {
-            const auto& is_set =
-                    static_cast<const ColumnVector<UInt8>&>(*columns[i]).get_data()[row_num];
-            if (is_set) {
-                this->data(place).add(
-                        binary_cast<NativeType, DateValueType>(timestamp), i - NON_EVENT_NUM,
-                        IAggregateFunction::get_argument_types().size() - NON_EVENT_NUM, window);
+            max_one_row_byte_size += columns[i]->get_max_row_byte_size();
+        }
+        if ((max_one_row_byte_size * batch_size) > _buffer_size) {
+            _buffer_size = max_one_row_byte_size * batch_size;
+            _buffer = arena->alloc(_buffer_size);
+        }
+        if (_values.size() < batch_size) _values.resize(batch_size);
+
+        for (size_t i = 0; i < batch_size; ++i) {
+            _values[i].data = reinterpret_cast<char*>(_buffer + i * max_one_row_byte_size);
+            _values[i].size = 0;
+        }
+
+        for (int i = 0; i < IAggregateFunction::get_argument_types().size(); i++) {
+            if (i == 1) {
+                continue;
+            }
+            columns[i]->serialize_vec(_values, batch_size, max_one_row_byte_size);
+        }
+
+        for (int i = 0; i < batch_size; i++) {
+            const auto& window = *reinterpret_cast<const Int64*>(_values[i].data);
+            // TODO: handle mode in the future.
+            // be/src/olap/row_block2.cpp copy_data_to_column
+            const auto& timestamp =
+                    *reinterpret_cast<const NativeType*>(_values[i].data + sizeof(Int64));
+            for (int j = NON_EVENT_NUM; j < IAggregateFunction::get_argument_types().size(); j++) {
+                const auto& is_set = *reinterpret_cast<const UInt8*>(
+                        _values[i].data + sizeof(Int64) + sizeof(NativeType) +
+                        sizeof(UInt8) * (j - NON_EVENT_NUM));
+                if (is_set) {
+                    this->data(places[i] + place_offset)
+                            .add(binary_cast<NativeType, DateValueType>(timestamp),
+                                 j - NON_EVENT_NUM,
+                                 IAggregateFunction::get_argument_types().size() - NON_EVENT_NUM,
+                                 window);
+                }
+            }
+        }
+    }
+
+    void add_batch_single_place(size_t batch_size, AggregateDataPtr place, const IColumn** columns,
+                                Arena* arena) override {
+        constexpr int NON_EVENT_NUM = 3;
+        size_t max_one_row_byte_size =
+                columns[0]->get_max_row_byte_size() + columns[2]->get_max_row_byte_size();
+        for (int i = NON_EVENT_NUM; i < IAggregateFunction::get_argument_types().size(); i++) {
+            max_one_row_byte_size += columns[i]->get_max_row_byte_size();
+        }
+        if ((max_one_row_byte_size * batch_size) > _buffer_size) {
+            _buffer_size = max_one_row_byte_size * batch_size;
+            _buffer = arena->alloc(_buffer_size);
+        }
+        if (_values.size() < batch_size) _values.resize(batch_size);
+
+        for (size_t i = 0; i < batch_size; ++i) {
+            _values[i].data = reinterpret_cast<char*>(_buffer + i * max_one_row_byte_size);
+            _values[i].size = 0;
+        }
+
+        for (int i = 0; i < IAggregateFunction::get_argument_types().size(); i++) {
+            if (i == 1) {
+                continue;
+            }
+            columns[i]->serialize_vec(_values, batch_size, max_one_row_byte_size);
+        }
+
+        for (int i = 0; i < batch_size; i++) {
+            const auto& window = *reinterpret_cast<const Int64*>(_values[i].data);
+            // TODO: handle mode in the future.
+            // be/src/olap/row_block2.cpp copy_data_to_column
+            const auto& timestamp =
+                    *reinterpret_cast<const NativeType*>(_values[i].data + sizeof(Int64));
+            for (int j = NON_EVENT_NUM; j < IAggregateFunction::get_argument_types().size(); j++) {
+                const auto& is_set = *reinterpret_cast<const UInt8*>(
+                        _values[i].data + sizeof(Int64) + sizeof(NativeType) +
+                        sizeof(UInt8) * (j - NON_EVENT_NUM));
+                if (is_set) {
+                    this->data(place).add(
+                            binary_cast<NativeType, DateValueType>(timestamp), j - NON_EVENT_NUM,
+                            IAggregateFunction::get_argument_types().size() - NON_EVENT_NUM,
+                            window);
+                }
             }
         }
     }
@@ -219,6 +299,11 @@ public:
                         AggregateFunctionWindowFunnel<DateValueType, NativeType>>::data(place)
                         .get());
     }
+
+private:
+    size_t _buffer_size = 0;
+    char* _buffer = nullptr;
+    std::vector<StringRef> _values;
 };
 
 } // namespace doris::vectorized

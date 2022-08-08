@@ -135,7 +135,7 @@ public:
       *  and do a single call to "add_batch" for devirtualization and inlining.
       */
     virtual void add_batch(size_t batch_size, AggregateDataPtr* places, size_t place_offset,
-                           const IColumn** columns, Arena* arena) const = 0;
+                           const IColumn** columns, Arena* arena) = 0;
 
     // same as add_batch, but only call "add" function when place is not nullptr
     virtual void add_batch_selected(size_t batch_size, AggregateDataPtr* places,
@@ -145,7 +145,7 @@ public:
     /** The same for single place.
       */
     virtual void add_batch_single_place(size_t batch_size, AggregateDataPtr place,
-                                        const IColumn** columns, Arena* arena) const = 0;
+                                        const IColumn** columns, Arena* arena) = 0;
 
     // only used at agg reader
     virtual void add_batch_range(size_t batch_begin, size_t batch_end, AggregateDataPtr place,
@@ -173,7 +173,7 @@ public:
             : IAggregateFunction(argument_types_, parameters_) {}
 
     void add_batch(size_t batch_size, AggregateDataPtr* places, size_t place_offset,
-                   const IColumn** columns, Arena* arena) const override {
+                   const IColumn** columns, Arena* arena) override {
         for (size_t i = 0; i < batch_size; ++i) {
             static_cast<const Derived*>(this)->add(places[i] + place_offset, columns, i, arena);
         }
@@ -189,7 +189,7 @@ public:
     }
 
     void add_batch_single_place(size_t batch_size, AggregateDataPtr place, const IColumn** columns,
-                                Arena* arena) const override {
+                                Arena* arena) override {
         for (size_t i = 0; i < batch_size; ++i) {
             static_cast<const Derived*>(this)->add(place, columns, i, arena);
         }

@@ -24,7 +24,7 @@ suite("window_funnel") {
 
     sql """ DROP TABLE IF EXISTS ${tableName} """
     sql """
-            CREATE TABLE IF NOT EXISTS ${tableName} (
+            CREATE TABLE IF NOT EXISTS test (
                 xwho varchar(50) NULL COMMENT 'xwho',
                 xwhen datetime COMMENT 'xwhen',
                 xwhat int NULL COMMENT 'xwhat'
