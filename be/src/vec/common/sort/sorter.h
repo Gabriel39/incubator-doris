@@ -67,7 +67,8 @@ public:
               _offset(offset),
               _pool(pool),
               _is_asc_order(is_asc_order),
-              _nulls_first(nulls_first) {}
+              _nulls_first(nulls_first),
+              _materialize_sort_exprs(vsort_exec_exprs.need_materialize_tuple()) {}
 
     virtual ~Sorter() = default;
 
@@ -81,6 +82,8 @@ public:
     virtual Status prepare_for_read() = 0;
 
     virtual Status get_next(RuntimeState* state, Block* block, bool* eos) = 0;
+
+    virtual bool reuse_mem() { return true; }
 
 protected:
     Status partial_sort(Block& src_block, Block& dest_block);
@@ -97,6 +100,7 @@ protected:
     RuntimeProfile::Counter* _merge_block_timer = nullptr;
 
     std::priority_queue<MergeSortBlockCursor> _block_priority_queue;
+    bool _materialize_sort_exprs;
 };
 
 class FullSorter final : public Sorter {

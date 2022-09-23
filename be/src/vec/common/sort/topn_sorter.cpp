@@ -61,8 +61,8 @@ Status TopNSorter::_do_sort(Block* block) {
         // if one block totally greater the heap top of _block_priority_queue
         // we can throw the block data directly.
         if (_state->num_rows < _limit) {
-            _state->sorted_blocks.emplace_back(std::move(sorted_block));
             _state->num_rows += sorted_block.rows();
+            _state->sorted_blocks.emplace_back(std::move(sorted_block));
             _block_priority_queue.emplace(_pool->add(
                     new MergeSortCursorImpl(_state->sorted_blocks.back(), _sort_description)));
         } else {

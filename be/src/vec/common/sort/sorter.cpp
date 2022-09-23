@@ -73,8 +73,7 @@ Status MergeSorterState::merge_sort_read(doris::RuntimeState* state,
 }
 
 Status Sorter::partial_sort(Block& src_block, Block& dest_block) {
-    bool materialized = false;
-    if (_vsort_exec_exprs.need_materialize_tuple()) {
+    if (_materialize_sort_exprs) {
         auto output_tuple_expr_ctxs = _vsort_exec_exprs.sort_tuple_slot_expr_ctxs();
         std::vector<int> valid_column_ids(output_tuple_expr_ctxs.size());
         for (int i = 0; i < output_tuple_expr_ctxs.size(); ++i) {
@@ -86,17 +85,14 @@ Status Sorter::partial_sort(Block& src_block, Block& dest_block) {
             new_block.insert(src_block.get_by_position(column_id));
         }
         dest_block.swap(new_block);
-        materialized = true;
     }
 
     _sort_description.resize(_vsort_exec_exprs.lhs_ordering_expr_ctxs().size());
+    Block* ordering_block = _materialize_sort_exprs ? &dest_block : &src_block;
     for (int i = 0; i < _sort_description.size(); i++) {
         const auto& ordering_expr = _vsort_exec_exprs.lhs_ordering_expr_ctxs()[i];
-        if (materialized) {
-            RETURN_IF_ERROR(ordering_expr->execute(&src_block, &_sort_description[i].column_number));
-        } else {
-            RETURN_IF_ERROR(ordering_expr->execute(&dest_block, &_sort_description[i].column_number));
-        }
+        RETURN_IF_ERROR(
+                ordering_expr->execute(ordering_block, &_sort_description[i].column_number));
 
         _sort_description[i].direction = _is_asc_order[i] ? 1 : -1;
         _sort_description[i].nulls_direction =
@@ -105,7 +101,7 @@ Status Sorter::partial_sort(Block& src_block, Block& dest_block) {
 
     {
         SCOPED_TIMER(_partial_sort_timer);
-        if (materialized) {
+        if (_materialize_sort_exprs) {
             sort_block(dest_block, _sort_description, _offset + _limit);
         } else {
             sort_block(src_block, dest_block, _sort_description, _offset + _limit);
