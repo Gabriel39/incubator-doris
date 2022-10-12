@@ -66,6 +66,10 @@ struct StringRef {
 
     explicit operator std::string() const { return to_string(); }
 
+    StringRef substring(int start_pos, int new_len) const {
+        return StringRef(data + start_pos, (new_len < 0) ? (size - start_pos) : new_len);
+    }
+
     StringVal to_string_val() {
         return StringVal(reinterpret_cast<uint8_t*>(const_cast<char*>(data)), size);
     }
