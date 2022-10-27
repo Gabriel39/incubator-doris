@@ -49,6 +49,7 @@ Status VDataStreamRecvr::SenderQueue::get_batch(Block** next_block) {
         CANCEL_SAFE_SCOPED_TIMER(
                 _received_first_batch ? NULL : _recvr->_first_batch_wait_total_timer,
                 &_is_cancelled);
+        LOG(WARNING) << "=====8 wait";
         _data_arrival_cv.wait(l);
     }
 
@@ -117,10 +118,12 @@ void VDataStreamRecvr::SenderQueue::add_block(const PBlock& pblock, int be_numbe
 
     if (_num_remaining_senders <= 0) {
         DCHECK(_sender_eos_set.end() != _sender_eos_set.find(be_number));
+        LOG(WARNING) << "=====2 _num_remaining_senders";
         return;
     }
 
     if (_is_cancelled) {
+        LOG(WARNING) << "=====3 _is_cancelled";
         return;
     }
 
@@ -143,6 +146,7 @@ void VDataStreamRecvr::SenderQueue::add_block(const PBlock& pblock, int be_numbe
         *done = nullptr;
     }
     _recvr->_num_buffered_bytes += block_byte_size;
+    LOG(WARNING) << "=====1 notify_one";
     _data_arrival_cv.notify_one();
 }
 
@@ -170,6 +174,7 @@ void VDataStreamRecvr::SenderQueue::add_block(Block* block, bool use_move) {
 
     size_t block_size = nblock->bytes();
     _block_queue.emplace_back(block_size, nblock);
+    LOG(WARNING) << "=====5 notify_one";
     _data_arrival_cv.notify_one();
 
     if (_recvr->exceeds_limit(block_size)) {
@@ -199,6 +204,7 @@ void VDataStreamRecvr::SenderQueue::decrement_senders(int be_number) {
     VLOG_FILE << "decremented senders: fragment_instance_id=" << _recvr->fragment_instance_id()
               << " node_id=" << _recvr->dest_node_id() << " #senders=" << _num_remaining_senders;
     if (_num_remaining_senders == 0) {
+        LOG(WARNING) << "=====6 notify_one";
         _data_arrival_cv.notify_one();
     }
 }
@@ -215,6 +221,7 @@ void VDataStreamRecvr::SenderQueue::cancel() {
     }
     // Wake up all threads waiting to produce/consume batches.  They will all
     // notice that the stream is cancelled and handle it.
+    LOG(WARNING) << "=====7 notify_all";
     _data_arrival_cv.notify_all();
     // _data_removal_cv.notify_all();
     // PeriodicCounterUpdater::StopTimeSeriesCounter(
