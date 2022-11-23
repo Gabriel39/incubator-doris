@@ -57,7 +57,7 @@ public class PredicatePushDown {
      * @return {@link PlanNode}
      */
     public static PlanNode visitScanNode(ScanNode scanNode, JoinOperator joinOp, Analyzer analyzer) {
-        switch (joinOp) {
+        switch (joinOp.toThrift()) {
             case INNER_JOIN:
             case LEFT_OUTER_JOIN:
                 predicateFromLeftSidePropagatesToRightSide(scanNode, analyzer);

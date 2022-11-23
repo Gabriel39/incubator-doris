@@ -110,13 +110,14 @@ public abstract class JoinNodeBase extends PlanNode {
     }
 
     protected void computeOutputTuple(Analyzer analyzer) throws UserException {
+        // TODO(mark join) if it is mark join use mark tuple instead?
         // 1. create new tuple
         vOutputTupleDesc = analyzer.getDescTbl().createTupleDescriptor();
         boolean copyLeft = false;
         boolean copyRight = false;
         boolean leftNullable = false;
         boolean rightNullable = false;
-        switch (joinOp) {
+        switch (joinOp.toThrift()) {
             case INNER_JOIN:
             case CROSS_JOIN:
                 copyLeft = true;
@@ -338,17 +339,20 @@ public abstract class JoinNodeBase extends PlanNode {
 
     protected abstract void computeOtherConjuncts(Analyzer analyzer, ExprSubstitutionMap originToIntermediateSmap);
 
-    protected void computeIntermediateTuple(Analyzer analyzer) throws AnalysisException {
+    protected void computeIntermediateTuple(Analyzer analyzer, TupleDescriptor markTuple) throws AnalysisException {
         // 1. create new tuple
         TupleDescriptor vIntermediateLeftTupleDesc = analyzer.getDescTbl().createTupleDescriptor();
         TupleDescriptor vIntermediateRightTupleDesc = analyzer.getDescTbl().createTupleDescriptor();
         vIntermediateTupleDescList = new ArrayList<>();
         vIntermediateTupleDescList.add(vIntermediateLeftTupleDesc);
         vIntermediateTupleDescList.add(vIntermediateRightTupleDesc);
+        if (markTuple != null) {
+            vIntermediateTupleDescList.add(markTuple);
+        }
         boolean leftNullable = false;
         boolean rightNullable = false;
 
-        switch (joinOp) {
+        switch (joinOp.toThrift()) {
             case LEFT_OUTER_JOIN:
                 rightNullable = true;
                 break;
@@ -446,7 +450,11 @@ public abstract class JoinNodeBase extends PlanNode {
     public void finalize(Analyzer analyzer) throws UserException {
         super.finalize(analyzer);
         if (VectorizedUtil.isVectorized()) {
-            computeIntermediateTuple(analyzer);
+            TupleDescriptor markTuple = null;
+            if (innerRef != null) {
+                markTuple = analyzer.getMarkTuple(innerRef);
+            }
+            computeIntermediateTuple(analyzer, markTuple);
         }
     }
 
@@ -495,7 +503,7 @@ public abstract class JoinNodeBase extends PlanNode {
         if (vOutputTupleDesc != null) {
             return Lists.newArrayList(vOutputTupleDesc.getId());
         }
-        switch (joinOp) {
+        switch (joinOp.toThrift()) {
             case LEFT_SEMI_JOIN:
             case LEFT_ANTI_JOIN:
             case NULL_AWARE_LEFT_ANTI_JOIN:
@@ -513,7 +521,7 @@ public abstract class JoinNodeBase extends PlanNode {
         if (vOutputTupleDesc != null) {
             return Lists.newArrayList(vOutputTupleDesc.getId());
         }
-        switch (joinOp) {
+        switch (joinOp.toThrift()) {
             case LEFT_SEMI_JOIN:
             case LEFT_ANTI_JOIN:
             case NULL_AWARE_LEFT_ANTI_JOIN:

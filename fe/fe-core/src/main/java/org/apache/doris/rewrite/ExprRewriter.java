@@ -67,7 +67,7 @@ public class ExprRewriter {
         OTHER_CLAUSE; // All other clauses that are not on and not where
 
         public static ClauseType fromJoinType(JoinOperator joinOp) {
-            switch (joinOp) {
+            switch (joinOp.toThrift()) {
                 case INNER_JOIN: return INNER_JOIN_CLAUSE;
                 case LEFT_OUTER_JOIN: return LEFT_OUTER_JOIN_CLAUSE;
                 case RIGHT_OUTER_JOIN: return RIGHT_OUTER_JOIN_CLAUSE;

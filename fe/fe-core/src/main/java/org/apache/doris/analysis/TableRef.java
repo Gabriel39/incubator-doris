@@ -621,7 +621,7 @@ public class TableRef implements ParseNode, Writable {
 
     private String joinOpToSql() {
         Preconditions.checkState(joinOp != null);
-        switch (joinOp) {
+        switch (joinOp.toThrift()) {
             case INNER_JOIN:
                 return "INNER JOIN";
             case LEFT_OUTER_JOIN:

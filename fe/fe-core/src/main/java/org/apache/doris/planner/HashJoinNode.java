@@ -297,7 +297,7 @@ public class HashJoinNode extends JoinNodeBase {
     protected Pair<Boolean, Boolean> needToCopyRightAndLeft() {
         boolean copyleft = true;
         boolean copyRight = true;
-        switch (joinOp) {
+        switch (joinOp.toThrift()) {
             case LEFT_ANTI_JOIN:
             case LEFT_SEMI_JOIN:
             case NULL_AWARE_LEFT_ANTI_JOIN:
@@ -640,7 +640,7 @@ public class HashJoinNode extends JoinNodeBase {
             }
 
             double selectivity = 1.0;
-            switch (joinOp) {
+            switch (joinOp.toThrift()) {
                 case LEFT_SEMI_JOIN: {
                     selectivity = (double) Math.min(lhsNdv, rhsNdv) / (double) (lhsNdv);
                     break;

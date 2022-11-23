@@ -124,7 +124,7 @@ public class HashJoinStatsDerive extends BaseStatsDerive {
             }
 
             double selectivity = 1.0;
-            switch (joinOp) {
+            switch (joinOp.toThrift()) {
                 case LEFT_SEMI_JOIN: {
                     selectivity = (double) Math.min(lhsNdv, rhsNdv) / (double) (lhsNdv);
                     break;
