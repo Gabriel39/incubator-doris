@@ -382,6 +382,15 @@ void VNestedLoopJoinNode::_update_tuple_is_null_column(Block* block) {
             right_null_map.get_data().resize_fill(block->rows(), 0);
         }
     }
+    if (_is_mark_join) {
+        IColumn::Filter& mark_data =
+                assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
+                        *block->get_by_position(block->columns() - 1).column->assume_mutable())
+                        .get_data();
+        if (mark_data.size() < block->rows()) {
+            mark_data.resize_fill(block->rows(), 1);
+        }
+    }
 }
 
 void VNestedLoopJoinNode::_add_tuple_is_null_column(Block* block) {
@@ -438,6 +447,12 @@ void VNestedLoopJoinNode::_finalize_current_phase(MutableColumns& dst_columns, s
                         ->get_data()
                         .resize_fill(pre_size + selector_idx, 0);
             }
+            if (_is_mark_join) {
+                IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
+                                                     *dst_columns[dst_columns.size() - 1])
+                                                     .get_data();
+                mark_data.resize_fill(pre_size + selector_idx, 1);
+            }
 
             for (size_t j = 0; j < _num_build_side_columns; ++j) {
                 auto src_column = cur_block.get_by_position(j);
@@ -476,6 +491,13 @@ void VNestedLoopJoinNode::_finalize_current_phase(MutableColumns& dst_columns, s
             if (_cur_probe_row_visited_flags) {
                 return;
             }
+        }
+
+        if (_is_mark_join) {
+            IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
+                                                 *dst_columns[dst_columns.size() - 1])
+                                                 .get_data();
+            mark_data.resize_fill(pre_size + 1, 1);
         }
 
         DCHECK_LT(_left_block_pos, _left_block.rows());
@@ -573,7 +595,15 @@ Status VNestedLoopJoinNode::_do_filtering_and_update_visited_flags(
     for (size_t i = 0; i < column_to_keep; ++i) {                    \
         block->get_by_position(i).column->assume_mutable()->clear(); \
     }
-            if (materialize) {
+            if (_is_mark_join) {
+                IColumn::Filter& mark_data =
+                        assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
+                                *block->get_by_position(column_to_keep).column->assume_mutable())
+                                .get_data();
+                mark_data.resize(filter.size());
+                memcpy(const_cast<void*>(reinterpret_cast<const void*>(mark_data.data())),
+                       reinterpret_cast<const void*>(filter.data()), filter.size());
+            } else if (materialize) {
                 Block::filter_block_internal(block, filter, column_to_keep);
             } else {
                 CLEAR_BLOCK
@@ -602,7 +632,15 @@ Status VNestedLoopJoinNode::_do_filtering_and_update_visited_flags(
                 if constexpr (SetProbeSideFlag) {
                     _cur_probe_row_visited_flags |= ret;
                 }
-                if (!materialize) {
+                if (_is_mark_join) {
+                    IColumn::Filter& mark_data =
+                            assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
+                                    *block->get_by_position(column_to_keep)
+                                             .column->assume_mutable())
+                                    .get_data();
+                    mark_data.resize(const_column->size());
+                    memset(reinterpret_cast<void*>(mark_data.data()), 0, mark_data.size());
+                } else if (!materialize) {
                     CLEAR_BLOCK
                 }
             }
@@ -631,7 +669,15 @@ Status VNestedLoopJoinNode::_do_filtering_and_update_visited_flags(
                 _cur_probe_row_visited_flags |=
                         simd::contain_byte<uint8>(filter.data(), filter.size(), 1);
             }
-            if (materialize) {
+            if (_is_mark_join) {
+                IColumn::Filter& mark_data =
+                        assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
+                                *block->get_by_position(column_to_keep).column->assume_mutable())
+                                .get_data();
+                mark_data.resize(filter.size());
+                memcpy(reinterpret_cast<void*>(mark_data.data()),
+                       reinterpret_cast<const void*>(filter.data()), filter.size());
+            } else if (materialize) {
                 Block::filter_block_internal(block, filter, column_to_keep);
             } else {
                 CLEAR_BLOCK

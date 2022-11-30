@@ -48,6 +48,11 @@ VJoinNodeBase::VJoinNodeBase(ObjectPool* pool, const TPlanNode& tnode, const Des
                              _join_op == TJoinOp::LEFT_SEMI_JOIN ||
                              _join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN),
           _is_outer_join(_match_all_build || _match_all_probe),
+          _is_mark_join(tnode.__isset.nested_loop_join_node
+                                ? (tnode.nested_loop_join_node.__isset.is_mark
+                                           ? tnode.nested_loop_join_node.is_mark
+                                           : false)
+                                : false),
           _short_circuit_for_null_in_build_side(_join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
     _init_join_op();
     if (tnode.__isset.hash_join_node) {
@@ -82,6 +87,11 @@ void VJoinNodeBase::_construct_mutable_join_block() {
             auto type_ptr = slot_desc->get_data_type_ptr();
             _join_block.insert({type_ptr->create_column(), type_ptr, slot_desc->col_name()});
         }
+    }
+    if (_is_mark_join) {
+        _join_block.replace_by_position(
+                _join_block.columns() - 1,
+                remove_nullable(_join_block.get_by_position(_join_block.columns() - 1).column));
     }
 }
 
