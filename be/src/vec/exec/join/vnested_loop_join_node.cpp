@@ -494,10 +494,7 @@ void VNestedLoopJoinNode::_finalize_current_phase(MutableColumns& dst_columns, s
         }
 
         if (_is_mark_join) {
-            IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
-                                                 *dst_columns[dst_columns.size() - 1])
-                                                 .get_data();
-            mark_data.resize_fill(pre_size + 1, 1);
+            return;
         }
 
         DCHECK_LT(_left_block_pos, _left_block.rows());
