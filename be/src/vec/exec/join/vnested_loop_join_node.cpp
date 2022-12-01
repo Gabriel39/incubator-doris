@@ -596,10 +596,10 @@ Status VNestedLoopJoinNode::_do_filtering_and_update_visited_flags(
         block->get_by_position(i).column->assume_mutable()->clear(); \
     }
             if (_is_mark_join) {
-                IColumn::Filter& mark_data =
-                        assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
-                                *block->get_by_position(column_to_keep).column->assume_mutable())
-                                .get_data();
+                IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
+                                                     *block->get_by_position(column_to_keep - 1)
+                                                              .column->assume_mutable())
+                                                     .get_data();
                 mark_data.resize(filter.size());
                 memcpy(const_cast<void*>(reinterpret_cast<const void*>(mark_data.data())),
                        reinterpret_cast<const void*>(filter.data()), filter.size());
@@ -635,7 +635,7 @@ Status VNestedLoopJoinNode::_do_filtering_and_update_visited_flags(
                 if (_is_mark_join) {
                     IColumn::Filter& mark_data =
                             assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
-                                    *block->get_by_position(column_to_keep)
+                                    *block->get_by_position(column_to_keep - 1)
                                              .column->assume_mutable())
                                     .get_data();
                     mark_data.resize(const_column->size());
@@ -670,10 +670,10 @@ Status VNestedLoopJoinNode::_do_filtering_and_update_visited_flags(
                         simd::contain_byte<uint8>(filter.data(), filter.size(), 1);
             }
             if (_is_mark_join) {
-                IColumn::Filter& mark_data =
-                        assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
-                                *block->get_by_position(column_to_keep).column->assume_mutable())
-                                .get_data();
+                IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
+                                                     *block->get_by_position(column_to_keep - 1)
+                                                              .column->assume_mutable())
+                                                     .get_data();
                 mark_data.resize(filter.size());
                 memcpy(reinterpret_cast<void*>(mark_data.data()),
                        reinterpret_cast<const void*>(filter.data()), filter.size());
