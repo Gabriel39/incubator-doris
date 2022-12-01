@@ -264,9 +264,6 @@ Status VNestedLoopJoinNode::get_next(RuntimeState* state, Block* block, bool* eo
                             return status;
                         }
                         mutable_join_block = MutableBlock(std::move(tmp_block));
-                        if (_is_mark_join && _build_blocks.empty()) {
-                            _append_left_data_with_null(mutable_join_block);
-                        }
                         // If this join operation is left outer join or full outer join, when
                         // `_current_build_pos == _build_blocks.size()`, means all rows from build
                         // side have been joined with the current probe row, we should output current
@@ -283,9 +280,6 @@ Status VNestedLoopJoinNode::get_next(RuntimeState* state, Block* block, bool* eo
                     }
 
                     if (!_matched_rows_done && _current_build_pos == _build_blocks.size()) {
-                        if (_is_mark_join && _build_blocks.empty()) {
-                            _append_left_data_with_null(mutable_join_block);
-                        }
                         _reset_with_next_probe_row(mutable_join_block);
                     }
                 }
@@ -331,6 +325,7 @@ Status VNestedLoopJoinNode::get_next(RuntimeState* state, Block* block, bool* eo
     return Status::OK();
 }
 
+template <bool IsAnti>
 void VNestedLoopJoinNode::_append_left_data_with_null(MutableBlock& mutable_block) const {
     auto& dst_columns = mutable_block.mutable_columns();
     DCHECK(_is_mark_join);
@@ -356,7 +351,7 @@ void VNestedLoopJoinNode::_append_left_data_with_null(MutableBlock& mutable_bloc
     IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
                                          *dst_columns[dst_columns.size() - 1])
                                          .get_data();
-    mark_data.resize_fill(mark_data.size() + 1, 0);
+    mark_data.resize_fill(mark_data.size() + 1, IsAnti ? 1 : 0);
 }
 
 void VNestedLoopJoinNode::_process_left_child_block(MutableBlock& mutable_block,
@@ -442,6 +437,7 @@ void VNestedLoopJoinNode::_finalize_current_phase(MutableBlock& mutable_block, s
     DCHECK_GT(dst_columns.size(), 0);
     auto pre_size = dst_columns[0]->size();
     if constexpr (BuildSide) {
+        DCHECK(!_is_mark_join);
         auto build_block_sz = _build_blocks.size();
         size_t i = _output_null_idx_build_side;
         for (; i < build_block_sz; i++) {
@@ -481,12 +477,6 @@ void VNestedLoopJoinNode::_finalize_current_phase(MutableBlock& mutable_block, s
                         ->get_data()
                         .resize_fill(pre_size + selector_idx, 0);
             }
-            if (_is_mark_join) {
-                IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
-                                                     *dst_columns[dst_columns.size() - 1])
-                                                     .get_data();
-                mark_data.resize_fill(pre_size + selector_idx, 1);
-            }
 
             for (size_t j = 0; j < _num_build_side_columns; ++j) {
                 auto src_column = cur_block.get_by_position(j);
@@ -518,17 +508,24 @@ void VNestedLoopJoinNode::_finalize_current_phase(MutableBlock& mutable_block, s
         _output_null_idx_build_side = i;
     } else {
         if constexpr (IsSemi) {
-            if (!_cur_probe_row_visited_flags) {
+            if (!_cur_probe_row_visited_flags && !_is_mark_join) {
                 return;
             }
         } else {
-            if (_cur_probe_row_visited_flags) {
+            if (_cur_probe_row_visited_flags && !_is_mark_join) {
                 return;
             }
         }
 
         if (_is_mark_join) {
-            return;
+            IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
+                                                 *dst_columns[dst_columns.size() - 1])
+                                                 .get_data();
+            mark_data.resize_fill(mark_data.size() + 1,
+                                  (IsSemi && !_cur_probe_row_visited_flags) ||
+                                                  (!IsSemi && _cur_probe_row_visited_flags)
+                                          ? 0
+                                          : 1);
         }
 
         DCHECK_LT(_left_block_pos, _left_block.rows());
@@ -626,15 +623,7 @@ Status VNestedLoopJoinNode::_do_filtering_and_update_visited_flags(
     for (size_t i = 0; i < column_to_keep; ++i) {                    \
         block->get_by_position(i).column->assume_mutable()->clear(); \
     }
-            if (_is_mark_join) {
-                IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
-                                                     *block->get_by_position(column_to_keep - 1)
-                                                              .column->assume_mutable())
-                                                     .get_data();
-                mark_data.resize(filter.size());
-                memcpy(const_cast<void*>(reinterpret_cast<const void*>(mark_data.data())),
-                       reinterpret_cast<const void*>(filter.data()), filter.size());
-            } else if (materialize) {
+            if (materialize) {
                 Block::filter_block_internal(block, filter, column_to_keep);
             } else {
                 CLEAR_BLOCK
@@ -663,15 +652,7 @@ Status VNestedLoopJoinNode::_do_filtering_and_update_visited_flags(
                 if constexpr (SetProbeSideFlag) {
                     _cur_probe_row_visited_flags |= ret;
                 }
-                if (_is_mark_join) {
-                    IColumn::Filter& mark_data =
-                            assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
-                                    *block->get_by_position(column_to_keep - 1)
-                                             .column->assume_mutable())
-                                    .get_data();
-                    mark_data.resize(const_column->size());
-                    memset(reinterpret_cast<void*>(mark_data.data()), 0, mark_data.size());
-                } else if (!materialize) {
+                if (!materialize) {
                     CLEAR_BLOCK
                 }
             }
@@ -700,15 +681,7 @@ Status VNestedLoopJoinNode::_do_filtering_and_update_visited_flags(
                 _cur_probe_row_visited_flags |=
                         simd::contain_byte<uint8>(filter.data(), filter.size(), 1);
             }
-            if (_is_mark_join) {
-                IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
-                                                     *block->get_by_position(column_to_keep - 1)
-                                                              .column->assume_mutable())
-                                                     .get_data();
-                mark_data.resize(filter.size());
-                memcpy(reinterpret_cast<void*>(mark_data.data()),
-                       reinterpret_cast<const void*>(filter.data()), filter.size());
-            } else if (materialize) {
+            if (materialize) {
                 Block::filter_block_internal(block, filter, column_to_keep);
             } else {
                 CLEAR_BLOCK
