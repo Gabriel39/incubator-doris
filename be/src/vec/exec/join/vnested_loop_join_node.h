@@ -90,7 +90,6 @@ private:
 
     // For mark join, if the relation from right side is empty, we should construct intermediate
     // block with data from left side and filled with null for right side
-    template <bool IsAnti>
     void _append_left_data_with_null(MutableBlock& mutable_block) const;
 
     // List of build blocks, constructed in prepare()

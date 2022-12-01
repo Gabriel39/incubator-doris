@@ -280,6 +280,12 @@ Status VNestedLoopJoinNode::get_next(RuntimeState* state, Block* block, bool* eo
                     }
 
                     if (!_matched_rows_done && _current_build_pos == _build_blocks.size()) {
+                        if (_is_mark_join && _build_blocks.empty()) {
+                            DCHECK_EQ(JoinOpType::value, TJoinOp::CROSS_JOIN);
+                            _append_left_data_with_null(mutable_join_block);
+                            _reset_with_next_probe_row(mutable_join_block);
+                            break;
+                        }
                         _reset_with_next_probe_row(mutable_join_block);
                     }
                 }
@@ -325,7 +331,6 @@ Status VNestedLoopJoinNode::get_next(RuntimeState* state, Block* block, bool* eo
     return Status::OK();
 }
 
-template <bool IsAnti>
 void VNestedLoopJoinNode::_append_left_data_with_null(MutableBlock& mutable_block) const {
     auto& dst_columns = mutable_block.mutable_columns();
     DCHECK(_is_mark_join);
@@ -351,7 +356,7 @@ void VNestedLoopJoinNode::_append_left_data_with_null(MutableBlock& mutable_bloc
     IColumn::Filter& mark_data = assert_cast<doris::vectorized::ColumnVector<UInt8>&>(
                                          *dst_columns[dst_columns.size() - 1])
                                          .get_data();
-    mark_data.resize_fill(mark_data.size() + 1, IsAnti ? 1 : 0);
+    mark_data.resize_fill(mark_data.size() + 1, 0);
 }
 
 void VNestedLoopJoinNode::_process_left_child_block(MutableBlock& mutable_block,
