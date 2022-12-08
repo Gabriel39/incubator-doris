@@ -45,6 +45,7 @@ set(PIPELINE_FILES
         exec/sort_sink_operator.cpp
         exec/repeat_operator.cpp
         exec/table_function_operator.cpp
+        exec/select_operator.cpp
         )
 
 add_library(Pipeline STATIC
