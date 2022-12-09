@@ -26,6 +26,7 @@
 #include "pipeline/pipeline_fragment_context.h"
 #include "service/brpc.h"
 #include "util/proto_util.h"
+#include "util/time.h"
 #include "vec/sink/vdata_stream_sender.h"
 
 namespace doris::pipeline {
@@ -63,6 +64,7 @@ public:
         }
     }
 
+public:
     brpc::Controller cntl;
     T result;
 

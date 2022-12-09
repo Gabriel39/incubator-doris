@@ -94,8 +94,6 @@ public:
 
     size_t get_pending_bytes() const;
 
-    const RowDescriptor& row_desc() { return _input_row_desc; }
-
 private:
     // make input data valid for OLAP table
     // return number of invalid/filtered rows.
