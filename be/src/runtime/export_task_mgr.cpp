@@ -17,14 +17,13 @@
 
 #include "runtime/export_task_mgr.h"
 
-#include <gen_cpp/BackendService_types.h>
-#include <gen_cpp/FrontendService.h>
-#include <gen_cpp/HeartbeatService_types.h>
-#include <thrift/protocol/TDebugProtocol.h>
-
-#include "runtime/client_cache.h"
+#include "gen_cpp/BackendService.h"
+#include "gen_cpp/FrontendService.h"
+#include "gen_cpp/HeartbeatService_types.h"
+#include "gen_cpp/MasterService_types.h"
 #include "runtime/exec_env.h"
 #include "runtime/fragment_mgr.h"
+#include "runtime/plan_fragment_executor.h"
 #include "runtime/runtime_state.h"
 #include "util/uid_util.h"
 
@@ -38,6 +37,8 @@ ExportTaskMgr::ExportTaskMgr(ExecEnv* exec_env)
         : _exec_env(exec_env),
           _success_tasks(LRU_MAX_CASH_TASK_NUM),
           _failed_tasks(LRU_MAX_CASH_TASK_NUM) {}
+
+ExportTaskMgr::~ExportTaskMgr() {}
 
 Status ExportTaskMgr::init() {
     return Status::OK();
@@ -62,8 +63,8 @@ Status ExportTaskMgr::start_task(const TExportTaskRequest& request) {
     }
 
     RETURN_IF_ERROR(_exec_env->fragment_mgr()->exec_plan_fragment(
-            request.params, std::bind<void>(&ExportTaskMgr::finalize_task, this,
-                                            std::placeholders::_1, std::placeholders::_2)));
+            request.params,
+            std::bind<void>(&ExportTaskMgr::finalize_task, this, std::placeholders::_1)));
 
     // redo this task if failed before
     if (_failed_tasks.exists(id)) {
@@ -104,17 +105,19 @@ Status ExportTaskMgr::erase_task(const TUniqueId& id) {
     return Status::OK();
 }
 
-void ExportTaskMgr::finalize_task(RuntimeState* state, Status* status) {
+void ExportTaskMgr::finalize_task(PlanFragmentExecutor* executor) {
     ExportTaskResult result;
 
-    if (status->ok()) {
+    RuntimeState* state = executor->runtime_state();
+
+    if (executor->status().ok()) {
         result.files = state->export_output_files();
     }
 
-    finish_task(state->fragment_instance_id(), *status, result);
+    finish_task(state->fragment_instance_id(), executor->status(), result);
 
     // Try to report this finished task to master
-    report_to_master(state);
+    report_to_master(executor);
 }
 
 Status ExportTaskMgr::finish_task(const TUniqueId& id, const Status& status,
@@ -175,8 +178,9 @@ Status ExportTaskMgr::get_task_state(const TUniqueId& id, TExportStatusResult* r
     return Status::OK();
 }
 
-void ExportTaskMgr::report_to_master(RuntimeState* state) {
+void ExportTaskMgr::report_to_master(PlanFragmentExecutor* executor) {
     TUpdateExportTaskStatusRequest request;
+    RuntimeState* state = executor->runtime_state();
     request.protocolVersion = FrontendServiceVersion::V1;
     request.taskId = state->fragment_instance_id();
     Status status = get_task_state(state->fragment_instance_id(), &request.taskStatus);

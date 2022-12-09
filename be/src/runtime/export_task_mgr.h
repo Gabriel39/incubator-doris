@@ -23,7 +23,7 @@
 
 #include "common/status.h"
 #include "gen_cpp/Types_types.h"
-#include "runtime/runtime_state.h"
+#include "util/hash_util.hpp"
 #include "util/lru_cache.hpp"
 
 namespace doris {
@@ -50,7 +50,7 @@ class ExportTaskMgr {
 public:
     ExportTaskMgr(ExecEnv* exec_env);
 
-    virtual ~ExportTaskMgr() = default;
+    virtual ~ExportTaskMgr();
 
     Status init();
 
@@ -64,10 +64,10 @@ public:
 
     Status get_task_state(const TUniqueId& id, TExportStatusResult* status_result);
 
-    void finalize_task(RuntimeState* state, Status* status);
+    void finalize_task(PlanFragmentExecutor* executor);
 
 private:
-    void report_to_master(RuntimeState* state);
+    void report_to_master(PlanFragmentExecutor* executor);
 
     ExecEnv* _exec_env;
 

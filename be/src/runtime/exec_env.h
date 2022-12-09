@@ -17,8 +17,6 @@
 
 #pragma once
 
-#include <gen_cpp/FrontendService.h>
-
 #include <unordered_map>
 
 #include "common/config.h"
@@ -69,6 +67,7 @@ class SmallFileMgr;
 class StoragePolicyMgr;
 
 class BackendServiceClient;
+class FrontendServiceClient;
 class TPaloBrokerServiceClient;
 class PBackendService_Stub;
 class PFunctionService_Stub;
@@ -103,7 +102,7 @@ public:
     // declarations for classes in scoped_ptrs.
     ~ExecEnv();
 
-    const bool initialized() const { return _is_init; }
+    const bool initialized() { return _is_init; }
     const std::string& token() const;
     ExternalScanContextMgr* external_scan_context_mgr() { return _external_scan_context_mgr; }
     DataStreamMgr* stream_mgr() { return _stream_mgr; }
@@ -192,6 +191,7 @@ private:
     void _register_metrics();
     void _deregister_metrics();
 
+private:
     bool _is_init;
     std::vector<StorePath> _store_paths;
     // path => store index

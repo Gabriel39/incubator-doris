@@ -19,7 +19,10 @@
 
 #include <memory>
 
+#include "gen_cpp/FrontendService.h"
 #include "gen_cpp/FrontendService_types.h"
+#include "gen_cpp/HeartbeatService_types.h"
+#include "gen_cpp/Types_types.h"
 
 namespace doris {
 
@@ -52,6 +55,7 @@ private:
     // return true if stat is set, otherwise, return false
     bool collect_load_stat(StreamLoadContext* ctx, TTxnCommitAttachment* attachment);
 
+private:
     ExecEnv* _exec_env;
 };
 
