@@ -43,6 +43,8 @@ public:
     bool is_pending_finish() const override;
 
     bool runtime_filters_are_ready_or_timeout() override;
+
+    std::string debug_string() const override;
 };
 
 } // namespace doris::pipeline

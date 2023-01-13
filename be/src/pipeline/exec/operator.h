@@ -225,7 +225,7 @@ public:
     const RowDescriptor& row_desc();
 
     RuntimeProfile* runtime_profile() { return _runtime_profile.get(); }
-    std::string debug_string() const;
+    virtual std::string debug_string() const;
     int32_t id() const { return _operator_builder->id(); }
 
 protected:
