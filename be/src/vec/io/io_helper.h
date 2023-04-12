@@ -339,7 +339,7 @@ bool read_decimal_text_impl(T& x, ReadBuffer& buf, UInt32 precision, UInt32 scal
                 (const char*)buf.position(), buf.count(), precision, scale, &result);
         // only to match the is_all_read() check to prevent return null
         buf.position() = buf.end();
-        return result == StringParser::PARSE_SUCCESS;
+        return result == StringParser::PARSE_SUCCESS || result == StringParser::PARSE_UNDERFLOW;
     } else {
         StringParser::ParseResult result = StringParser::PARSE_SUCCESS;
 
@@ -350,7 +350,7 @@ bool read_decimal_text_impl(T& x, ReadBuffer& buf, UInt32 precision, UInt32 scal
         // only to match the is_all_read() check to prevent return null
         buf.position() = buf.end();
 
-        return result == StringParser::PARSE_SUCCESS;
+        return result == StringParser::PARSE_SUCCESS || result == StringParser::PARSE_UNDERFLOW;
     }
 }
 
