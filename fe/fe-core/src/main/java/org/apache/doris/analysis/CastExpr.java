@@ -474,7 +474,7 @@ public class CastExpr extends Expr {
             return new LargeIntLiteral(value.getStringValue());
         } else if (type.isDecimalV2() || type.isDecimalV3()) {
             if (targetTypeDef != null) {
-                return new DecimalLiteral(value.getStringValue(),
+                return new DecimalLiteral(value.getStringValue(), targetTypeDef.getType().getPrecision(),
                         ((ScalarType) targetTypeDef.getType()).getScalarScale());
             } else {
                 return new DecimalLiteral(value.getStringValue());

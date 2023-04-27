@@ -35,9 +35,11 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.text.NumberFormat;
 import java.util.Objects;
 
 public class DecimalLiteral extends LiteralExpr {
@@ -73,7 +75,7 @@ public class DecimalLiteral extends LiteralExpr {
         analysisDone();
     }
 
-    public DecimalLiteral(String value, int scale) throws AnalysisException {
+    public DecimalLiteral(String value, int precision, int scale) throws AnalysisException {
         BigDecimal v = null;
         try {
             v = new BigDecimal(value);
@@ -82,6 +84,14 @@ public class DecimalLiteral extends LiteralExpr {
         }
         if (scale >= 0) {
             v = v.setScale(scale, RoundingMode.DOWN);
+        }
+        if (v.precision() - v.scale() > precision - scale) {
+            NumberFormat nf = NumberFormat.getInstance();
+            nf.setGroupingUsed(false);
+            BigInteger intValue = new BigInteger(nf.format(v.floatValue() > 0 ? Math.pow(10, precision)
+                    : -Math.pow(10, precision)));
+            v = new BigDecimal(
+                    intValue.add(v.floatValue() > 0 ? BigInteger.valueOf(-1) : BigInteger.valueOf(1)), scale);
         }
         init(v);
         analysisDone();

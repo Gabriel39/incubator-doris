@@ -303,8 +303,9 @@ static Status convert_column_with_decimal_data(const arrow::Array* array, size_t
         // convert scale to 9
         if (scale != 9) {
             value = convert_decimals<vectorized::DataTypeDecimal<vectorized::Decimal128>,
-                                     vectorized::DataTypeDecimal<vectorized::Decimal128>>(value,
-                                                                                          scale, 9);
+                                     vectorized::DataTypeDecimal<vectorized::Decimal128>>(
+                    value, scale, 9, max_decimal_value<Decimal128>(27),
+                    min_decimal_value<Decimal128>(27));
         }
         column_data.emplace_back(value);
     }
