@@ -102,7 +102,6 @@ doris::Status VCastExpr::execute(VExprContext* context, doris::vectorized::Block
     size_t num_columns_without_result = block->columns();
     // prepare a column to save result
     block->insert({nullptr, _data_type, _expr_name});
-    LOG(WARNING) << "=======1 " << _data_type->get_name();
     RETURN_IF_ERROR(_function->execute(context->fn_context(_fn_context_index), *block,
                                        {static_cast<size_t>(column_id), const_param_id},
                                        num_columns_without_result, block->rows(), false));
