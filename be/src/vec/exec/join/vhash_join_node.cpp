@@ -138,6 +138,29 @@ struct ProcessHashTableBuild {
             }
             _join_node->add_hash_buckets_filled_info(hash_table_buckets_info);
         }};
+        size_t max_one_row_byte_size = 0;
+        size_t num_rows = _build_raw_ptrs[0]->size();
+        for (const auto& build_column : _build_raw_ptrs) {
+            max_one_row_byte_size += build_column->get_max_row_byte_size();
+        }
+        size_t total_bytes = max_one_row_byte_size * num_rows;
+        if (total_bytes > _join_node->_serialized_key_buffer_size) {
+            _join_node->_serialized_key_buffer_size = total_bytes;
+            _join_node->_serialize_key_arena->clear();
+            _join_node->_serialized_key_buffer =
+                    reinterpret_cast<uint8_t*>(_join_node->_serialize_key_arena->alloc(
+                            _join_node->_serialized_key_buffer_size));
+        }
+
+        for (size_t i = 0; i < num_rows; ++i) {
+            _join_node->_keys[i].data = reinterpret_cast<char*>(_join_node->_serialized_key_buffer +
+                                                                i * max_one_row_byte_size);
+            _join_node->_keys[i].size = 0;
+        }
+
+        for (const auto& build_column : _build_raw_ptrs) {
+            build_column->serialize_vec(_join_node->_keys, num_rows, max_one_row_byte_size);
+        }
 
         KeyGetter key_getter(_build_raw_ptrs, _join_node->_build_key_sz, nullptr);
 
@@ -332,6 +355,8 @@ HashJoinNode::HashJoinNode(ObjectPool* pool, const TPlanNode& tnode, const Descr
     // one block can store 4g data, _build_blocks can store 128*4g data.
     // if probe data bigger than 512g, runtime filter maybe will core dump when insert data.
     _build_blocks->reserve(_MAX_BUILD_BLOCK_COUNT);
+
+    _serialize_key_arena.reset(new Arena());
 }
 
 Status HashJoinNode::init(const TPlanNode& tnode, RuntimeState* state) {

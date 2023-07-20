@@ -292,6 +292,11 @@ private:
     DataTypes _right_table_data_types;
     DataTypes _left_table_data_types;
 
+    size_t _serialized_key_buffer_size = 0;
+    uint8_t* _serialized_key_buffer;
+    std::unique_ptr<Arena> _serialize_key_arena;
+    std::vector<StringRef> _keys;
+
     RuntimeProfile::Counter* _build_table_timer;
     RuntimeProfile::Counter* _build_expr_call_timer;
     RuntimeProfile::Counter* _build_table_insert_timer;
