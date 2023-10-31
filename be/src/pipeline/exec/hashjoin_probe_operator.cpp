@@ -142,6 +142,8 @@ Status HashJoinProbeLocalState::close(RuntimeState* state) {
                                          }},
                    *_process_hashtable_ctx_variants);
     }
+    _shared_state->arena = nullptr;
+    _shared_state->hash_table_variants = nullptr;
     _process_hashtable_ctx_variants = nullptr;
     _null_map_column = nullptr;
     _tuple_is_null_left_flag_column = nullptr;
