@@ -54,27 +54,19 @@ struct ExchangeDataDependency final : public Dependency {
 public:
     ENABLE_FACTORY_CREATOR(ExchangeDataDependency);
     ExchangeDataDependency(int id, vectorized::VDataStreamRecvr::SenderQueue* sender_queue)
-            : Dependency(id, "DataDependency"), _always_done(false) {}
+            : Dependency(id, "DataDependency"), _sender_queue(sender_queue) {}
     void* shared_state() override { return nullptr; }
-
-    void set_always_done() {
-        _always_done = true;
-        if (_ready_for_read) {
-            return;
+    [[nodiscard]] Dependency* read_blocked_by() override {
+        if (config::enable_fuzzy_mode && _sender_queue->should_wait() &&
+            _read_dependency_watcher.elapsed_time() > SLOW_DEPENDENCY_THRESHOLD) {
+            LOG(WARNING) << "========Dependency may be blocked by some reasons: " << name() << " "
+                         << id();
         }
-        _read_dependency_watcher.stop();
-        _ready_for_read = true;
-    }
-
-    void block_reading() override {
-        if (_always_done) {
-            return;
-        }
-        _ready_for_read = false;
+        return _sender_queue->should_wait() ? this : nullptr;
     }
 
 private:
-    std::atomic<bool> _always_done;
+    vectorized::VDataStreamRecvr::SenderQueue* _sender_queue;
 };
 
 class ExchangeSourceOperatorX;

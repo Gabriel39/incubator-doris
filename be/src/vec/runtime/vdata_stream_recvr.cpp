@@ -99,9 +99,6 @@ Status VDataStreamRecvr::SenderQueue::_inner_get_batch_without_lock(Block* block
     auto [next_block, block_byte_size] = std::move(_block_queue.front());
     _recvr->update_blocks_memory_usage(-block_byte_size);
     _block_queue.pop_front();
-    if (_block_queue.size() == 0 && _dependency) {
-        _dependency->block_reading();
-    }
 
     if (!_pending_closures.empty()) {
         auto closure_pair = _pending_closures.front();
@@ -172,9 +169,6 @@ Status VDataStreamRecvr::SenderQueue::add_block(const PBlock& pblock, int be_num
 
     if (!empty) {
         _block_queue.emplace_back(std::move(block), block_byte_size);
-        if (_dependency) {
-            _dependency->set_ready_for_read();
-        }
     }
     // if done is nullptr, this function can't delay this response
     if (done != nullptr && _recvr->exceeds_limit(block_byte_size)) {
@@ -228,9 +222,6 @@ void VDataStreamRecvr::SenderQueue::add_block(Block* block, bool use_move) {
 
     if (!empty) {
         _block_queue.emplace_back(std::move(nblock), block_mem_size);
-        if (_dependency) {
-            _dependency->set_ready_for_read();
-        }
         _data_arrival_cv.notify_one();
     }
 
@@ -267,9 +258,6 @@ void VDataStreamRecvr::SenderQueue::decrement_senders(int be_number) {
               << print_id(_recvr->fragment_instance_id()) << " node_id=" << _recvr->dest_node_id()
               << " #senders=" << _num_remaining_senders;
     if (_num_remaining_senders == 0) {
-        if (_dependency) {
-            _dependency->set_always_done();
-        }
         _data_arrival_cv.notify_one();
     }
 }
@@ -282,9 +270,6 @@ void VDataStreamRecvr::SenderQueue::cancel(Status cancel_status) {
         }
         _is_cancelled = true;
         _cancel_status = cancel_status;
-        if (_dependency) {
-            _dependency->set_always_done();
-        }
         VLOG_QUERY << "cancelled stream: _fragment_instance_id="
                    << print_id(_recvr->fragment_instance_id())
                    << " node_id=" << _recvr->dest_node_id();
@@ -312,9 +297,6 @@ void VDataStreamRecvr::SenderQueue::close() {
         // is clear will be memory leak
         std::lock_guard<std::mutex> l(_lock);
         _is_cancelled = true;
-        if (_dependency) {
-            _dependency->set_always_done();
-        }
 
         for (auto closure_pair : _pending_closures) {
             closure_pair.first->Run();
@@ -544,9 +526,6 @@ void VDataStreamRecvr::PipSenderQueue::add_block(Block* block, bool use_move) {
             return;
         }
         _block_queue.emplace_back(std::move(nblock), block_mem_size);
-        if (_dependency) {
-            _dependency->set_ready_for_read();
-        }
         COUNTER_UPDATE(_recvr->_local_bytes_received_counter, block_mem_size);
         _recvr->update_blocks_memory_usage(block_mem_size);
         _data_arrival_cv.notify_one();

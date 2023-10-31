@@ -58,7 +58,6 @@ class PQueryStatistics;
 class RuntimeState;
 
 namespace pipeline {
-struct ExchangeDataDependency;
 class ChannelDependency;
 } // namespace pipeline
 
@@ -221,10 +220,6 @@ public:
         return _block_queue.empty();
     }
 
-    void set_dependency(std::shared_ptr<pipeline::ExchangeDataDependency> dependency) {
-        _dependency = dependency;
-    }
-
     void set_channel_dependency(std::shared_ptr<pipeline::ChannelDependency> channel_dependency) {
         _channel_dependency = channel_dependency;
     }
@@ -250,7 +245,6 @@ protected:
     std::deque<std::pair<google::protobuf::Closure*, MonotonicStopWatch>> _pending_closures;
     std::unordered_map<std::thread::id, std::unique_ptr<ThreadClosure>> _local_closure;
 
-    std::shared_ptr<pipeline::ExchangeDataDependency> _dependency = nullptr;
     std::shared_ptr<pipeline::ChannelDependency> _channel_dependency = nullptr;
 };
 
