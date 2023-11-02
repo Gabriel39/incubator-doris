@@ -173,40 +173,19 @@ Status ExchangeSinkLocalState::init(RuntimeState* state, LocalSinkStateInfo& inf
 
     register_channels(_sink_buffer.get());
 
-    _exchange_sink_dependency = AndDependency::create_shared(_parent->operator_id());
-    _queue_dependency = ExchangeSinkQueueDependency::create_shared(_parent->operator_id());
-    _sink_buffer->set_dependency(_queue_dependency, _finish_dependency);
-    _exchange_sink_dependency->add_child(_queue_dependency);
+    _exchange_sink_dependency = ExchangeSinkQueueDependency::create_shared(_parent->operator_id());
+    _exchange_sink_dependency->sink_buffer = _sink_buffer.get();
     if ((p._part_type == TPartitionType::UNPARTITIONED || channels.size() == 1) &&
         !only_local_exchange) {
-        _broadcast_dependency = BroadcastDependency::create_shared(_parent->operator_id());
-        _broadcast_dependency->set_available_block(config::num_broadcast_buffer);
-        _broadcast_pb_blocks.reserve(config::num_broadcast_buffer);
-        for (size_t i = 0; i < config::num_broadcast_buffer; i++) {
-            _broadcast_pb_blocks.emplace_back(
-                    vectorized::BroadcastPBlockHolder(_broadcast_dependency.get()));
-        }
-        _exchange_sink_dependency->add_child(_broadcast_dependency);
-
-        _wait_broadcast_buffer_timer =
-                ADD_CHILD_TIMER(_profile, "WaitForBroadcastBuffer", timer_name);
+        LOG(FATAL) << "111";
     } else if (local_size > 0) {
-        size_t dep_id = 0;
-        _channels_dependency.resize(local_size);
-        _wait_channel_timer.resize(local_size);
-        auto deps_for_channels = AndDependency::create_shared(_parent->operator_id());
-        for (auto channel : channels) {
-            if (channel->is_local()) {
-                _channels_dependency[dep_id] =
-                        ChannelDependency::create_shared(_parent->operator_id());
-                channel->set_dependency(_channels_dependency[dep_id]);
-                deps_for_channels->add_child(_channels_dependency[dep_id]);
-                _wait_channel_timer[dep_id] =
-                        ADD_CHILD_TIMER(_profile, "WaitForLocalExchangeBuffer", timer_name);
-                dep_id++;
+        _exchange_sink_dependency->channels.resize(channels.size());
+
+        for (size_t i = 0; i < channels.size(); i++) {
+            if (channels[i]->is_local()) {
+                _exchange_sink_dependency->channels[i] = channels[i];
             }
         }
-        _exchange_sink_dependency->add_child(deps_for_channels);
     }
     if (p._part_type == TPartitionType::HASH_PARTITIONED) {
         _partition_count = channels.size();
@@ -360,7 +339,7 @@ Status ExchangeSinkOperatorX::sink(RuntimeState* state, vectorized::Block* block
                         }
                     }
                     if (sent) {
-                        local_state._broadcast_dependency->take_available_block();
+                        LOG(FATAL) << "=====22";
                     }
                     cur_block.clear_column_data();
                     local_state._serializer.get_block()->set_muatable_columns(
@@ -506,15 +485,6 @@ Status ExchangeSinkLocalState::close(RuntimeState* state, Status exec_status) {
     }
     SCOPED_TIMER(exec_time_counter());
     SCOPED_TIMER(_close_timer);
-    COUNTER_UPDATE(_wait_queue_timer, _queue_dependency->write_watcher_elapse_time());
-    if (_broadcast_dependency) {
-        COUNTER_UPDATE(_wait_broadcast_buffer_timer,
-                       _broadcast_dependency->write_watcher_elapse_time());
-    }
-    for (size_t i = 0; i < _channels_dependency.size(); i++) {
-        COUNTER_UPDATE(_wait_channel_timer[i],
-                       _channels_dependency[i]->write_watcher_elapse_time());
-    }
     _sink_buffer->update_profile(profile());
     _sink_buffer->close();
     return PipelineXSinkLocalState<>::close(state, exec_status);

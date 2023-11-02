@@ -64,6 +64,7 @@ private:
     int _mult_cast_id = -1;
 };
 
+class ExchangeSinkLocalState;
 class ExchangeSinkQueueDependency final : public WriteDependency {
 public:
     ENABLE_FACTORY_CREATOR(ExchangeSinkQueueDependency);
@@ -71,6 +72,27 @@ public:
     ~ExchangeSinkQueueDependency() = default;
 
     void* shared_state() override { return nullptr; }
+
+    WriteDependency* write_blocked_by() override {
+        if (config::enable_fuzzy_mode && !_ready_for_write &&
+            _write_dependency_watcher.elapsed_time() > SLOW_DEPENDENCY_THRESHOLD) {
+            LOG(WARNING) << "========Dependency may be blocked by some reasons: " << name() << " "
+                         << id();
+        }
+        return sink_buffer->can_write() && channel_all_can_write() ? nullptr : this;
+    }
+
+    bool channel_all_can_write() {
+        for (auto channel : channels) {
+            if (!channel->can_write()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    ExchangeSinkBuffer<ExchangeSinkLocalState>* sink_buffer;
+    std::vector<vectorized::PipChannel<ExchangeSinkLocalState>*> channels;
 };
 
 class BroadcastDependency final : public WriteDependency {
@@ -205,10 +227,7 @@ private:
 
     vectorized::BlockSerializer<ExchangeSinkLocalState> _serializer;
 
-    std::shared_ptr<ExchangeSinkQueueDependency> _queue_dependency = nullptr;
-    std::shared_ptr<AndDependency> _exchange_sink_dependency = nullptr;
-    std::shared_ptr<BroadcastDependency> _broadcast_dependency = nullptr;
-    std::vector<std::shared_ptr<ChannelDependency>> _channels_dependency;
+    std::shared_ptr<ExchangeSinkQueueDependency> _exchange_sink_dependency = nullptr;
     std::unique_ptr<vectorized::PartitionerBase> _partitioner;
     int _partition_count;
 };
