@@ -65,7 +65,7 @@ Status ResultSinkLocalState::init(RuntimeState* state, LocalSinkStateInfo& info)
     RETURN_IF_ERROR(state->exec_env()->result_mgr()->create_sender(
             state->fragment_instance_id(), vectorized::RESULT_SINK_BUFFER_SIZE, &_sender, true,
             state->execution_timeout()));
-    _result_sink_dependency = OrDependency::create_shared(_parent->operator_id());
+    _result_sink_dependency = OrDependency::create_shared(_parent->operator_id(), _profile);
     _buffer_dependency = ResultBufferDependency::create_shared(_parent->operator_id());
     _cancel_dependency = CancelDependency::create_shared(_parent->operator_id());
     _result_sink_dependency->add_child(_cancel_dependency);

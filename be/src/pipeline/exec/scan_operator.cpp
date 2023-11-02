@@ -122,7 +122,8 @@ Status ScanLocalState<Derived>::init(RuntimeState* state, LocalStateInfo& info) 
     SCOPED_TIMER(_open_timer);
     RETURN_IF_ERROR(RuntimeFilterConsumer::init(state));
 
-    _source_dependency = OrDependency::create_shared(PipelineXLocalState<>::_parent->operator_id());
+    _source_dependency =
+            OrDependency::create_shared(PipelineXLocalState<>::_parent->operator_id(), profile());
 
     _open_dependency = OpenDependency::create_shared(PipelineXLocalState<>::_parent->operator_id());
     _source_dependency->add_child(_open_dependency);

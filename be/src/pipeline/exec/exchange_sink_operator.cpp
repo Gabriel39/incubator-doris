@@ -173,7 +173,8 @@ Status ExchangeSinkLocalState::init(RuntimeState* state, LocalSinkStateInfo& inf
 
     register_channels(_sink_buffer.get());
 
-    _exchange_sink_dependency = AndDependency::create_shared(_parent->operator_id());
+    _exchange_sink_dependency =
+            AndDependency::create_shared(_parent->operator_id(), _profile, "Root");
     _queue_dependency = ExchangeSinkQueueDependency::create_shared(_parent->operator_id());
     _sink_buffer->set_dependency(_queue_dependency, _finish_dependency);
     _exchange_sink_dependency->add_child(_queue_dependency);
@@ -194,7 +195,8 @@ Status ExchangeSinkLocalState::init(RuntimeState* state, LocalSinkStateInfo& inf
         size_t dep_id = 0;
         _channels_dependency.resize(local_size);
         _wait_channel_timer.resize(local_size);
-        auto deps_for_channels = AndDependency::create_shared(_parent->operator_id());
+        auto deps_for_channels =
+                AndDependency::create_shared(_parent->operator_id(), _profile, "Channels");
         for (auto channel : channels) {
             if (channel->is_local()) {
                 _channels_dependency[dep_id] =

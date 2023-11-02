@@ -262,7 +262,13 @@ protected:
 class AndDependency final : public WriteDependency {
 public:
     ENABLE_FACTORY_CREATOR(AndDependency);
-    AndDependency(int id) : WriteDependency(id, "AndDependency") {}
+    AndDependency(int id, RuntimeProfile* parent_profile, std::string profile_prefix = "")
+            : WriteDependency(id, "AndDependency") {
+        _read_dependency_timer =
+                ADD_TIMER(parent_profile, profile_prefix + "ReadDependencyOverhead");
+        _write_dependency_timer =
+                ADD_TIMER(parent_profile, profile_prefix + "WriteDependencyOverhead");
+    }
 
     [[nodiscard]] std::string name() const override {
         fmt::memory_buffer debug_string_buffer;
@@ -279,6 +285,7 @@ public:
     std::string debug_string(int indentation_level = 0) override;
 
     [[nodiscard]] Dependency* read_blocked_by() override {
+        SCOPED_TIMER(_read_dependency_timer);
         for (auto& child : _children) {
             if (auto* dep = child->read_blocked_by()) {
                 return dep;
@@ -288,6 +295,7 @@ public:
     }
 
     [[nodiscard]] WriteDependency* write_blocked_by() override {
+        SCOPED_TIMER(_write_dependency_timer);
         for (auto& child : _children) {
             CHECK(child->is_write_dependency());
             if (auto* dep = ((WriteDependency*)child.get())->write_blocked_by()) {
@@ -296,12 +304,19 @@ public:
         }
         return nullptr;
     }
+
+private:
+    RuntimeProfile::Counter* _read_dependency_timer = nullptr;
+    RuntimeProfile::Counter* _write_dependency_timer = nullptr;
 };
 
 class OrDependency final : public WriteDependency {
 public:
     ENABLE_FACTORY_CREATOR(OrDependency);
-    OrDependency(int id) : WriteDependency(id, "OrDependency") {}
+    OrDependency(int id, RuntimeProfile* parent_profile) : WriteDependency(id, "OrDependency") {
+        _read_dependency_timer = ADD_TIMER(parent_profile, "ReadDependencyOverhead");
+        _write_dependency_timer = ADD_TIMER(parent_profile, "WriteDependencyOverhead");
+    }
 
     [[nodiscard]] std::string name() const override {
         fmt::memory_buffer debug_string_buffer;
@@ -318,6 +333,7 @@ public:
     std::string debug_string(int indentation_level = 0) override;
 
     [[nodiscard]] Dependency* read_blocked_by() override {
+        SCOPED_TIMER(_read_dependency_timer);
         Dependency* res = nullptr;
         for (auto& child : _children) {
             auto* cur_res = child->read_blocked_by();
@@ -331,6 +347,7 @@ public:
     }
 
     [[nodiscard]] WriteDependency* write_blocked_by() override {
+        SCOPED_TIMER(_write_dependency_timer);
         WriteDependency* res = nullptr;
         for (auto& child : _children) {
             CHECK(child->is_write_dependency());
@@ -343,6 +360,10 @@ public:
         }
         return res;
     }
+
+private:
+    RuntimeProfile::Counter* _read_dependency_timer = nullptr;
+    RuntimeProfile::Counter* _write_dependency_timer = nullptr;
 };
 
 struct FakeSharedState {};
