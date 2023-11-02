@@ -61,7 +61,7 @@ public:
     void* shared_state() override { return nullptr; }
 
     Dependency* read_blocked_by() override {
-        if (config::enable_fuzzy_mode && !_ready_for_read &&
+        if (config::enable_fuzzy_mode && _empty_queue != 0 &&
             _read_dependency_watcher.elapsed_time() > SLOW_DEPENDENCY_THRESHOLD) {
             LOG(WARNING) << "========Dependency may be blocked by some reasons: " << name() << " "
                          << id();

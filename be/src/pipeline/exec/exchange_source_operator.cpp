@@ -54,6 +54,9 @@ Status ExchangeLocalState::init(RuntimeState* state, LocalStateInfo& info) {
     source_dependency =
             ExchangeDataDependency::create_shared(_parent->operator_id(), p.num_senders());
     const auto& queues = stream_recvr->sender_queues();
+    for (size_t i = 0; i < queues.size(); i++) {
+        queues[i]->set_dependency(source_dependency);
+    }
     static const std::string timer_name =
             "WaitForDependency[" + source_dependency->name() + "]Time";
     _wait_for_dependency_timer = ADD_TIMER(_runtime_profile, timer_name);
