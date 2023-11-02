@@ -53,28 +53,48 @@ public:
 struct ExchangeDataDependency final : public Dependency {
 public:
     ENABLE_FACTORY_CREATOR(ExchangeDataDependency);
-    ExchangeDataDependency(int id, vectorized::VDataStreamRecvr::SenderQueue* sender_queue)
-            : Dependency(id, "DataDependency"), _always_done(false) {}
+    ExchangeDataDependency(int id, int num_queue)
+            : Dependency(id, "DataDependency"),
+              _always_done(false),
+              _empty_queue(num_queue),
+              _num_queue(num_queue) {}
     void* shared_state() override { return nullptr; }
+
+    Dependency* read_blocked_by() override {
+        if (config::enable_fuzzy_mode && !_ready_for_read &&
+            _read_dependency_watcher.elapsed_time() > SLOW_DEPENDENCY_THRESHOLD) {
+            LOG(WARNING) << "========Dependency may be blocked by some reasons: " << name() << " "
+                         << id();
+        }
+        return _empty_queue == 0 ? nullptr : this;
+    }
+
+    void set_ready_for_read() override {
+        _empty_queue--;
+        DCHECK_GE(_empty_queue, 0);
+        if (_empty_queue == 0) {
+            _read_dependency_watcher.stop();
+        }
+    }
 
     void set_always_done() {
         _always_done = true;
-        if (_ready_for_read) {
-            return;
-        }
         _read_dependency_watcher.stop();
-        _ready_for_read = true;
+        _empty_queue = 0;
     }
 
-    void block_reading() override {
+    void try_block_reading() {
         if (_always_done) {
             return;
         }
-        _ready_for_read = false;
+        _empty_queue++;
+        DCHECK_LE(_empty_queue, _num_queue);
     }
 
 private:
     std::atomic<bool> _always_done;
+    std::atomic<int> _empty_queue;
+    const int _num_queue;
 };
 
 class ExchangeSourceOperatorX;
@@ -91,10 +111,7 @@ class ExchangeLocalState final : public PipelineXLocalState<> {
     int64_t num_rows_skipped;
     bool is_ready;
 
-    std::shared_ptr<AndDependency> source_dependency;
-    std::vector<std::shared_ptr<ExchangeDataDependency>> deps;
-
-    std::vector<RuntimeProfile::Counter*> metrics;
+    std::shared_ptr<ExchangeDataDependency> source_dependency;
 };
 
 class ExchangeSourceOperatorX final : public OperatorX<ExchangeLocalState> {

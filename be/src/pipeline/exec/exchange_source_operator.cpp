@@ -51,21 +51,12 @@ Status ExchangeLocalState::init(RuntimeState* state, LocalStateInfo& info) {
     stream_recvr = state->exec_env()->vstream_mgr()->create_recvr(
             state, p.input_row_desc(), state->fragment_instance_id(), p.node_id(), p.num_senders(),
             profile(), p.is_merging(), p.sub_plan_query_statistics_recvr());
-    source_dependency = AndDependency::create_shared(_parent->operator_id(), _runtime_profile.get());
+    source_dependency =
+            ExchangeDataDependency::create_shared(_parent->operator_id(), p.num_senders());
     const auto& queues = stream_recvr->sender_queues();
-    deps.resize(queues.size());
-    metrics.resize(queues.size());
-    for (size_t i = 0; i < queues.size(); i++) {
-        deps[i] = ExchangeDataDependency::create_shared(_parent->operator_id(), queues[i]);
-        queues[i]->set_dependency(deps[i]);
-        source_dependency->add_child(deps[i]);
-    }
-    for (size_t i = 0; i < queues.size(); i++) {
-        static const std::string timer_name =
-                "WaitForDependency[" + source_dependency->name() + "]Time";
-        _wait_for_dependency_timer = ADD_TIMER(_runtime_profile, timer_name);
-        metrics[i] = ADD_CHILD_TIMER(_runtime_profile, fmt::format("WaitForData{}", i), timer_name);
-    }
+    static const std::string timer_name =
+            "WaitForDependency[" + source_dependency->name() + "]Time";
+    _wait_for_dependency_timer = ADD_TIMER(_runtime_profile, timer_name);
     RETURN_IF_ERROR(_parent->cast<ExchangeSourceOperatorX>()._vsort_exec_exprs.clone(
             state, vsort_exec_exprs));
     return Status::OK();
@@ -174,9 +165,7 @@ Status ExchangeLocalState::close(RuntimeState* state) {
         return Status::OK();
     }
     const auto& queues = stream_recvr->sender_queues();
-    for (size_t i = 0; i < deps.size(); i++) {
-        COUNTER_SET(metrics[i], deps[i]->read_watcher_elapse_time());
-    }
+    COUNTER_SET(_wait_for_dependency_timer, source_dependency->read_watcher_elapse_time());
     if (stream_recvr != nullptr) {
         stream_recvr->close();
     }

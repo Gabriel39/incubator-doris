@@ -100,7 +100,7 @@ Status VDataStreamRecvr::SenderQueue::_inner_get_batch_without_lock(Block* block
     _recvr->update_blocks_memory_usage(-block_byte_size);
     _block_queue.pop_front();
     if (_block_queue.size() == 0 && _dependency) {
-        _dependency->block_reading();
+        _dependency->try_block_reading();
     }
 
     if (!_pending_closures.empty()) {
@@ -171,8 +171,9 @@ Status VDataStreamRecvr::SenderQueue::add_block(const PBlock& pblock, int be_num
     bool empty = !block->rows();
 
     if (!empty) {
+        auto empty_queue = _block_queue.empty();
         _block_queue.emplace_back(std::move(block), block_byte_size);
-        if (_dependency) {
+        if (_dependency && empty_queue) {
             _dependency->set_ready_for_read();
         }
     }
@@ -227,8 +228,9 @@ void VDataStreamRecvr::SenderQueue::add_block(Block* block, bool use_move) {
     bool empty = !nblock->rows();
 
     if (!empty) {
+        auto empty_queue = _block_queue.empty();
         _block_queue.emplace_back(std::move(nblock), block_mem_size);
-        if (_dependency) {
+        if (_dependency && empty_queue) {
             _dependency->set_ready_for_read();
         }
         _data_arrival_cv.notify_one();
@@ -543,8 +545,9 @@ void VDataStreamRecvr::PipSenderQueue::add_block(Block* block, bool use_move) {
         if (_is_cancelled) {
             return;
         }
+        auto empty_queue = _block_queue.empty();
         _block_queue.emplace_back(std::move(nblock), block_mem_size);
-        if (_dependency) {
+        if (_dependency && empty_queue) {
             _dependency->set_ready_for_read();
         }
         COUNTER_UPDATE(_recvr->_local_bytes_received_counter, block_mem_size);
