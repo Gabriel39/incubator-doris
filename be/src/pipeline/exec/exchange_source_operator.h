@@ -53,28 +53,19 @@ public:
 struct ExchangeDataDependency final : public Dependency {
 public:
     ENABLE_FACTORY_CREATOR(ExchangeDataDependency);
-    ExchangeDataDependency(int id, vectorized::VDataStreamRecvr::SenderQueue* sender_queue)
-            : Dependency(id, "DataDependency"), _always_done(false) {}
+    ExchangeDataDependency(int id) : Dependency(id, "DataDependency") {}
     void* shared_state() override { return nullptr; }
 
-    void set_always_done() {
-        _always_done = true;
-        if (_ready_for_read) {
-            return;
+    Dependency* read_blocked_by() override {
+        if (config::enable_fuzzy_mode && !_ready_for_read &&
+            _read_dependency_watcher.elapsed_time() > SLOW_DEPENDENCY_THRESHOLD) {
+            LOG(WARNING) << "========Dependency may be blocked by some reasons: " << name() << " "
+                         << id();
         }
-        _read_dependency_watcher.stop();
-        _ready_for_read = true;
+        return stream_recvr->ready_to_read() ? nullptr : this;
     }
 
-    void block_reading() override {
-        if (_always_done) {
-            return;
-        }
-        _ready_for_read = false;
-    }
-
-private:
-    std::atomic<bool> _always_done;
+    std::shared_ptr<doris::vectorized::VDataStreamRecvr> stream_recvr;
 };
 
 class ExchangeSourceOperatorX;
@@ -91,10 +82,7 @@ class ExchangeLocalState final : public PipelineXLocalState<> {
     int64_t num_rows_skipped;
     bool is_ready;
 
-    std::shared_ptr<AndDependency> source_dependency;
-    std::vector<std::shared_ptr<ExchangeDataDependency>> deps;
-
-    std::vector<RuntimeProfile::Counter*> metrics;
+    std::shared_ptr<ExchangeDataDependency> source_dependency;
 };
 
 class ExchangeSourceOperatorX final : public OperatorX<ExchangeLocalState> {
