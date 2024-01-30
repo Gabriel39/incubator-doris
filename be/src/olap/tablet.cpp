@@ -989,6 +989,8 @@ Status Tablet::capture_rs_readers(const Version& spec_version, std::vector<RowSe
     RETURN_IF_ERROR(
             capture_consistent_versions(spec_version, &version_path, skip_missing_version, false));
     RETURN_IF_ERROR(capture_rs_readers(version_path, rs_splits));
+    LOG(WARNING) << "=====debugmoji3 " << tablet_id() << " " << version_path.size() << " "
+                 << rs_splits->size();
     return Status::OK();
 }
 
