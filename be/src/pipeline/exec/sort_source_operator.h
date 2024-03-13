@@ -52,6 +52,7 @@ public:
     SortLocalState(RuntimeState* state, OperatorXBase* parent);
     ~SortLocalState() override = default;
 
+    Status close(RuntimeState* state) override;
 private:
     friend class SortSourceOperatorX;
 };

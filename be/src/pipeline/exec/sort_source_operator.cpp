@@ -28,6 +28,16 @@ OPERATOR_CODE_GENERATOR(SortSourceOperator, SourceOperator)
 SortLocalState::SortLocalState(RuntimeState* state, OperatorXBase* parent)
         : PipelineXLocalState<SortSharedState>(state, parent) {}
 
+Status SortLocalState::close(RuntimeState* state) {
+    SCOPED_TIMER(exec_time_counter());
+    SCOPED_TIMER(_close_timer);
+    if (_closed) {
+        return Status::OK();
+    }
+    _shared_state->sorter.reset();
+    return PipelineXLocalState<SortSharedState>::close(state);
+}
+
 SortSourceOperatorX::SortSourceOperatorX(ObjectPool* pool, const TPlanNode& tnode, int operator_id,
                                          const DescriptorTbl& descs)
         : OperatorX<SortLocalState>(pool, tnode, operator_id, descs) {}
