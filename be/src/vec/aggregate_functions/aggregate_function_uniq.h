@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "common/compiler_util.h" // IWYU pragma: keep
+#include "util/time.h"
 #include "vec/aggregate_functions/aggregate_function.h"
 #include "vec/columns/column.h"
 #include "vec/columns/column_vector.h"
@@ -194,17 +195,22 @@ public:
 
     void deserialize_and_merge(AggregateDataPtr __restrict place, AggregateDataPtr __restrict rhs,
                                BufferReadable& buf, Arena* arena) const override {
+        int64_t start = MonotonicNanos();
         auto& set = this->data(place).set;
         UInt64 size;
         read_var_uint(size, buf);
 
+        int64_t start1 = MonotonicNanos();
         set.rehash(size + set.size());
+        int64_t start2 = MonotonicNanos();
 
         for (size_t i = 0; i < size; ++i) {
             KeyType ref;
             read_pod_binary(ref, buf);
             set.insert(ref);
         }
+        int64_t start3 = MonotonicNanos();
+        LOG(WARNING) << "=======1 " << (start3 - start2) << " " << (start2 - start);
     }
 
     void deserialize(AggregateDataPtr __restrict place, BufferReadable& buf,
