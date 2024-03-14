@@ -210,7 +210,8 @@ public:
             set.insert(ref);
         }
         int64_t start3 = MonotonicNanos();
-        LOG(WARNING) << "=======1 " << (start3 - start2) << " " << (start2 - start);
+        LOG(WARNING) << "=======1 " << (start3 - start2) << " " << (start2 - start1) << " "
+                     << (start1 - start);
     }
 
     void deserialize(AggregateDataPtr __restrict place, BufferReadable& buf,
