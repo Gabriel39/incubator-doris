@@ -68,19 +68,6 @@ private:
 };
 
 inline const std::string& Exception::to_string() const {
-    if (!_cache_string.empty()) {
-        return _cache_string;
-    }
-    std::stringstream ostr;
-    ostr << "[E" << _code << "] ";
-    ostr << (_err_msg ? _err_msg->_msg : "");
-    if (_err_msg && !_err_msg->_stack.empty()) {
-        ostr << '\n' << _err_msg->_stack;
-    }
-    if (_nested_excption != nullptr) {
-        ostr << '\n' << "Caused by:" << _nested_excption->to_string();
-    }
-    _cache_string = ostr.str();
     return _cache_string;
 }
 
