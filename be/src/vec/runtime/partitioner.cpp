@@ -39,7 +39,6 @@ Status Partitioner<HashValueType, ChannelIds>::do_partitioning(RuntimeState* sta
         std::fill(_hash_vals.begin(), _hash_vals.end(), 0);
         auto* __restrict hashes = _hash_vals.data();
         {
-            SCOPED_CONSUME_MEM_TRACKER(mem_tracker);
             RETURN_IF_ERROR(_get_partition_column_result(block, result));
         }
         for (int j = 0; j < result_size; ++j) {
@@ -51,7 +50,6 @@ Status Partitioner<HashValueType, ChannelIds>::do_partitioning(RuntimeState* sta
         }
 
         {
-            SCOPED_CONSUME_MEM_TRACKER(mem_tracker);
             Block::erase_useless_column(block, column_to_keep);
         }
     }
