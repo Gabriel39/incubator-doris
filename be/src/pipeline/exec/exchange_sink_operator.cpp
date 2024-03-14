@@ -147,7 +147,6 @@ Status ExchangeSinkLocalState::init(RuntimeState* state, LocalSinkStateInfo& inf
                     channel_shared_ptrs[fragment_id_to_channel_index[fragment_instance_id.lo]]);
         }
     }
-    SCOPED_CONSUME_MEM_TRACKER(_mem_tracker.get());
 
     int local_size = 0;
     for (int i = 0; i < channels.size(); ++i) {
