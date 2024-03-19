@@ -201,7 +201,9 @@ public class ThriftHMSCachedClient implements HMSCachedClient {
         // table.setRetention(0);
         String location = hiveTable.getProperties().get("external_location");
         table.setSd(toHiveStorageDesc(hiveTable.getColumns(),
-                hiveTable.getFileFormat(),
+                hiveTable.getInputFormat(),
+                hiveTable.getOutputFormat(),
+                hiveTable.getSerDe(),
                 location));
         table.setPartitionKeys(hiveTable.getPartitionKeys());
         // table.setViewOriginalText(hiveTable.getViewSql());
@@ -211,10 +213,15 @@ public class ThriftHMSCachedClient implements HMSCachedClient {
         return table;
     }
 
-    private static StorageDescriptor toHiveStorageDesc(List<Column> columns, String fileFormat, String location) {
+    private static StorageDescriptor toHiveStorageDesc(List<Column> columns, String inputFormat, String outputFormat,
+                                                       String serDe, String location) {
         StorageDescriptor sd = new StorageDescriptor();
         sd.setCols(toHiveColumns(columns));
-        setFileFormat(fileFormat, sd);
+        SerDeInfo serDeInfo = new SerDeInfo();
+        serDeInfo.setSerializationLib(serDe);
+        sd.setSerdeInfo(serDeInfo);
+        sd.setInputFormat(inputFormat);
+        sd.setOutputFormat(outputFormat);
         if (StringUtils.isNotEmpty(location)) {
             sd.setLocation(location);
         }
@@ -222,28 +229,6 @@ public class ThriftHMSCachedClient implements HMSCachedClient {
         parameters.put("tag", "doris external hive talbe");
         sd.setParameters(parameters);
         return sd;
-    }
-
-    private static void setFileFormat(String fileFormat, StorageDescriptor sd) {
-        String inputFormat;
-        String outputFormat;
-        String serDe;
-        if (fileFormat.equalsIgnoreCase("orc")) {
-            inputFormat = "org.apache.hadoop.hive.ql.io.orc.OrcInputFormat";
-            outputFormat = "org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat";
-            serDe = "org.apache.hadoop.hive.ql.io.orc.OrcSerde";
-        } else if (fileFormat.equalsIgnoreCase("parquet")) {
-            inputFormat = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat";
-            outputFormat = "'org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat";
-            serDe = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe";
-        } else {
-            throw new IllegalArgumentException("Creating table with an unsupported file format: " + fileFormat);
-        }
-        SerDeInfo serDeInfo = new SerDeInfo();
-        serDeInfo.setSerializationLib(serDe);
-        sd.setSerdeInfo(serDeInfo);
-        sd.setInputFormat(inputFormat);
-        sd.setOutputFormat(outputFormat);
     }
 
     private static List<FieldSchema> toHiveColumns(List<Column> columns) {
@@ -310,19 +295,6 @@ public class ThriftHMSCachedClient implements HMSCachedClient {
     @Override
     public List<String> listPartitionNames(String dbName, String tblName) {
         return listPartitionNames(dbName, tblName, MAX_LIST_PARTITION_NUM);
-    }
-
-    public List<Partition> listPartitions(String dbName, String tblName) {
-        try (ThriftHMSClient client = getClient()) {
-            try {
-                return ugiDoAs(() -> client.client.listPartitions(dbName, tblName, MAX_LIST_PARTITION_NUM));
-            } catch (Exception e) {
-                client.setThrowable(e);
-                throw e;
-            }
-        } catch (Exception e) {
-            throw new HMSClientException("failed to check if table %s in db %s exists", e, tblName, dbName);
-        }
     }
 
     @Override

@@ -21,7 +21,6 @@ import org.apache.doris.analysis.CreateDbStmt;
 import org.apache.doris.analysis.CreateTableStmt;
 import org.apache.doris.analysis.DropDbStmt;
 import org.apache.doris.analysis.DropTableStmt;
-import org.apache.doris.analysis.TableName;
 import org.apache.doris.catalog.DatabaseIf;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.TableIf;
@@ -176,8 +175,6 @@ public interface CatalogIf<T extends DatabaseIf> {
         log.setProps(getProperties());
         return log;
     }
-
-    TableName getTableNameByTableId(Long tableId);
 
     // Return a copy of all db collection.
     Collection<DatabaseIf<? extends TableIf>> getAllDbs();

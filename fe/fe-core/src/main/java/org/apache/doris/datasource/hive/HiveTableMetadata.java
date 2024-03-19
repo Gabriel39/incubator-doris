@@ -30,7 +30,9 @@ public class HiveTableMetadata implements TableMetadata {
     private String tableName;
     private List<Column> columns;
     private List<FieldSchema> partitionKeys;
-    private String fileFormat;
+    private String inputFormat;
+    private String outputFormat;
+    private String serDe;
     private Map<String, String> properties;
     // private String viewSql;
 
@@ -39,12 +41,16 @@ public class HiveTableMetadata implements TableMetadata {
                              List<Column> columns,
                              List<FieldSchema> partitionKeys,
                              Map<String, String> props,
-                             String fileFormat) {
+                             String inputFormat,
+                             String outputFormat,
+                             String serDe) {
         this.dbName = dbName;
         this.tableName = tblName;
         this.columns = columns;
         this.partitionKeys = partitionKeys;
-        this.fileFormat = fileFormat;
+        this.inputFormat = inputFormat;
+        this.outputFormat = outputFormat;
+        this.serDe = serDe;
         this.properties = props;
     }
 
@@ -71,8 +77,16 @@ public class HiveTableMetadata implements TableMetadata {
         return partitionKeys;
     }
 
-    public String getFileFormat() {
-        return fileFormat;
+    public String getInputFormat() {
+        return inputFormat;
+    }
+
+    public String getOutputFormat() {
+        return outputFormat;
+    }
+
+    public String getSerDe() {
+        return serDe;
     }
 
     public static HiveTableMetadata of(String dbName,
@@ -80,7 +94,9 @@ public class HiveTableMetadata implements TableMetadata {
                                        List<Column> columns,
                                        List<FieldSchema> partitionKeys,
                                        Map<String, String> props,
-                                       String fileFormat) {
-        return new HiveTableMetadata(dbName, tblName, columns, partitionKeys, props, fileFormat);
+                                       String inputFormat,
+                                       String outputFormat, String serDe) {
+        return new HiveTableMetadata(dbName, tblName, columns, partitionKeys, props,
+                inputFormat, outputFormat, serDe);
     }
 }

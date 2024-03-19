@@ -21,7 +21,6 @@ import org.apache.doris.analysis.CreateDbStmt;
 import org.apache.doris.analysis.CreateTableStmt;
 import org.apache.doris.analysis.DropDbStmt;
 import org.apache.doris.analysis.DropTableStmt;
-import org.apache.doris.analysis.TableName;
 import org.apache.doris.catalog.Column;
 import org.apache.doris.catalog.DatabaseIf;
 import org.apache.doris.catalog.Env;
@@ -394,16 +393,6 @@ public abstract class ExternalCatalog
         } else {
             return Lists.newArrayList();
         }
-    }
-
-    public TableName getTableNameByTableId(Long tableId) {
-        for (DatabaseIf<?> db : idToDb.values()) {
-            TableIf table = db.getTableNullable(tableId);
-            if (table != null) {
-                return new TableName(getName(), db.getFullName(), table.getName());
-            }
-        }
-        return null;
     }
 
     @Override
