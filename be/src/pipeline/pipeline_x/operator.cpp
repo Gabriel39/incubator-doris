@@ -280,10 +280,9 @@ Status DataSinkOperatorXBase::init(const TPlanNode& tnode, RuntimeState* state) 
 }
 
 template <typename LocalStateType>
-Status DataSinkOperatorX<LocalStateType>::setup_local_state(RuntimeState* state,
-                                                            LocalSinkStateInfo& info) {
+Status DataSinkOperatorX<LocalStateType>::setup_local_state(RuntimeState* state) {
     auto local_state = LocalStateType::create_unique(this, state);
-    RETURN_IF_ERROR(local_state->init(state, info));
+    RETURN_IF_ERROR(local_state->init(state));
     state->emplace_sink_local_state(operator_id(), std::move(local_state));
     return Status::OK();
 }
@@ -309,9 +308,9 @@ std::shared_ptr<BasicSharedState> DataSinkOperatorX<LocalStateType>::create_shar
 }
 
 template <typename LocalStateType>
-Status OperatorX<LocalStateType>::setup_local_state(RuntimeState* state, LocalStateInfo& info) {
+Status OperatorX<LocalStateType>::setup_local_state(RuntimeState* state) {
     auto local_state = LocalStateType::create_unique(state, this);
-    RETURN_IF_ERROR(local_state->init(state, info));
+    RETURN_IF_ERROR(local_state->init(state));
     state->emplace_local_state(operator_id(), std::move(local_state));
     return Status::OK();
 }
@@ -332,10 +331,28 @@ PipelineXLocalStateBase::PipelineXLocalStateBase(RuntimeState* state, OperatorXB
 }
 
 template <typename SharedStateArg>
-Status PipelineXLocalState<SharedStateArg>::init(RuntimeState* state, LocalStateInfo& info) {
+Status PipelineXLocalState<SharedStateArg>::init(RuntimeState* state) {
     _runtime_profile.reset(new RuntimeProfile(_parent->get_name() + name_suffix()));
     _runtime_profile->set_metadata(_parent->node_id());
     _runtime_profile->set_is_sink(false);
+
+    _rows_returned_counter =
+            ADD_COUNTER_WITH_LEVEL(_runtime_profile, "RowsProduced", TUnit::UNIT, 1);
+    _blocks_returned_counter =
+            ADD_COUNTER_WITH_LEVEL(_runtime_profile, "BlocksProduced", TUnit::UNIT, 1);
+    _projection_timer = ADD_TIMER_WITH_LEVEL(_runtime_profile, "ProjectionTime", 1);
+    _open_timer = ADD_TIMER_WITH_LEVEL(_runtime_profile, "OpenTime", 1);
+    _close_timer = ADD_TIMER_WITH_LEVEL(_runtime_profile, "CloseTime", 1);
+    _exec_timer = ADD_TIMER_WITH_LEVEL(_runtime_profile, "ExecTime", 1);
+    _mem_tracker = std::make_unique<MemTracker>("PipelineXLocalState:" + _runtime_profile->name());
+    _memory_used_counter = ADD_LABEL_COUNTER_WITH_LEVEL(_runtime_profile, "MemoryUsage", 1);
+    _peak_memory_usage_counter = _runtime_profile->AddHighWaterMarkCounter(
+            "PeakMemoryUsage", TUnit::BYTES, "MemoryUsage", 1);
+    return Status::OK();
+}
+
+template <typename SharedStateArg>
+Status PipelineXLocalState<SharedStateArg>::open(RuntimeState* state, LocalStateInfo& info) {
     info.parent_profile->add_child(_runtime_profile.get(), true, nullptr);
     constexpr auto is_fake_shared = std::is_same_v<SharedStateArg, FakeSharedState>;
     if constexpr (!is_fake_shared) {
@@ -365,18 +382,6 @@ Status PipelineXLocalState<SharedStateArg>::init(RuntimeState* state, LocalState
     for (size_t i = 0; i < _projections.size(); i++) {
         RETURN_IF_ERROR(_parent->_projections[i]->clone(state, _projections[i]));
     }
-    _rows_returned_counter =
-            ADD_COUNTER_WITH_LEVEL(_runtime_profile, "RowsProduced", TUnit::UNIT, 1);
-    _blocks_returned_counter =
-            ADD_COUNTER_WITH_LEVEL(_runtime_profile, "BlocksProduced", TUnit::UNIT, 1);
-    _projection_timer = ADD_TIMER_WITH_LEVEL(_runtime_profile, "ProjectionTime", 1);
-    _open_timer = ADD_TIMER_WITH_LEVEL(_runtime_profile, "OpenTime", 1);
-    _close_timer = ADD_TIMER_WITH_LEVEL(_runtime_profile, "CloseTime", 1);
-    _exec_timer = ADD_TIMER_WITH_LEVEL(_runtime_profile, "ExecTime", 1);
-    _mem_tracker = std::make_unique<MemTracker>("PipelineXLocalState:" + _runtime_profile->name());
-    _memory_used_counter = ADD_LABEL_COUNTER_WITH_LEVEL(_runtime_profile, "MemoryUsage", 1);
-    _peak_memory_usage_counter = _runtime_profile->AddHighWaterMarkCounter(
-            "PeakMemoryUsage", TUnit::BYTES, "MemoryUsage", 1);
     return Status::OK();
 }
 
@@ -399,12 +404,25 @@ Status PipelineXLocalState<SharedStateArg>::close(RuntimeState* state) {
 }
 
 template <typename SharedState>
-Status PipelineXSinkLocalState<SharedState>::init(RuntimeState* state, LocalSinkStateInfo& info) {
+Status PipelineXSinkLocalState<SharedState>::init(RuntimeState* state) {
     // create profile
     _profile = state->obj_pool()->add(new RuntimeProfile(_parent->get_name() + name_suffix()));
     _profile->set_metadata(_parent->node_id());
     _profile->set_is_sink(true);
     _wait_for_finish_dependency_timer = ADD_TIMER(_profile, "PendingFinishDependency");
+    _rows_input_counter = ADD_COUNTER_WITH_LEVEL(_profile, "InputRows", TUnit::UNIT, 1);
+    _open_timer = ADD_TIMER_WITH_LEVEL(_profile, "OpenTime", 1);
+    _close_timer = ADD_TIMER_WITH_LEVEL(_profile, "CloseTime", 1);
+    _exec_timer = ADD_TIMER_WITH_LEVEL(_profile, "ExecTime", 1);
+    _memory_used_counter = ADD_LABEL_COUNTER_WITH_LEVEL(_profile, "MemoryUsage", 1);
+    _peak_memory_usage_counter =
+            _profile->AddHighWaterMarkCounter("PeakMemoryUsage", TUnit::BYTES, "MemoryUsage", 1);
+    return Status::OK();
+}
+
+template <typename SharedState>
+Status PipelineXSinkLocalState<SharedState>::open(RuntimeState* state, LocalSinkStateInfo& info) {
+    // create profile
     constexpr auto is_fake_shared = std::is_same_v<SharedState, FakeSharedState>;
     if constexpr (!is_fake_shared) {
         if constexpr (std::is_same_v<LocalExchangeSharedState, SharedState>) {
@@ -421,15 +439,8 @@ Status PipelineXSinkLocalState<SharedState>::init(RuntimeState* state, LocalSink
     } else {
         _dependency = nullptr;
     }
-    _rows_input_counter = ADD_COUNTER_WITH_LEVEL(_profile, "InputRows", TUnit::UNIT, 1);
-    _open_timer = ADD_TIMER_WITH_LEVEL(_profile, "OpenTime", 1);
-    _close_timer = ADD_TIMER_WITH_LEVEL(_profile, "CloseTime", 1);
-    _exec_timer = ADD_TIMER_WITH_LEVEL(_profile, "ExecTime", 1);
     info.parent_profile->add_child(_profile, true, nullptr);
     _mem_tracker = std::make_unique<MemTracker>(_parent->get_name());
-    _memory_used_counter = ADD_LABEL_COUNTER_WITH_LEVEL(_profile, "MemoryUsage", 1);
-    _peak_memory_usage_counter =
-            _profile->AddHighWaterMarkCounter("PeakMemoryUsage", TUnit::BYTES, "MemoryUsage", 1);
     return Status::OK();
 }
 
@@ -490,8 +501,17 @@ Status StatefulOperatorX<LocalStateType>::get_block(RuntimeState* state, vectori
 
 template <typename Writer, typename Parent>
     requires(std::is_base_of_v<vectorized::AsyncResultWriter, Writer>)
-Status AsyncWriterSink<Writer, Parent>::init(RuntimeState* state, LocalSinkStateInfo& info) {
-    RETURN_IF_ERROR(Base::init(state, info));
+Status AsyncWriterSink<Writer, Parent>::init(RuntimeState* state) {
+    RETURN_IF_ERROR(Base::init(state));
+    _wait_for_dependency_timer = ADD_TIMER_WITH_LEVEL(
+            _profile, "WaitForDependency[" + _async_writer_dependency->name() + "]Time", 1);
+    return Status::OK();
+}
+
+template <typename Writer, typename Parent>
+    requires(std::is_base_of_v<vectorized::AsyncResultWriter, Writer>)
+Status AsyncWriterSink<Writer, Parent>::open(RuntimeState* state, LocalSinkStateInfo& info) {
+    RETURN_IF_ERROR(Base::open(state, info));
     _output_vexpr_ctxs.resize(_parent->cast<Parent>()._output_vexpr_ctxs.size());
     for (size_t i = 0; i < _output_vexpr_ctxs.size(); i++) {
         RETURN_IF_ERROR(
@@ -501,16 +521,6 @@ Status AsyncWriterSink<Writer, Parent>::init(RuntimeState* state, LocalSinkState
     _async_writer_dependency = AsyncWriterDependency::create_shared(
             _parent->operator_id(), _parent->node_id(), state->get_query_ctx());
     _writer->set_dependency(_async_writer_dependency.get(), _finish_dependency.get());
-
-    _wait_for_dependency_timer = ADD_TIMER_WITH_LEVEL(
-            _profile, "WaitForDependency[" + _async_writer_dependency->name() + "]Time", 1);
-    return Status::OK();
-}
-
-template <typename Writer, typename Parent>
-    requires(std::is_base_of_v<vectorized::AsyncResultWriter, Writer>)
-Status AsyncWriterSink<Writer, Parent>::open(RuntimeState* state) {
-    RETURN_IF_ERROR(Base::open(state));
     RETURN_IF_ERROR(_writer->start_writer(state, _profile));
     return Status::OK();
 }

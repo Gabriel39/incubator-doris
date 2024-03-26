@@ -241,7 +241,6 @@ Status ExchangeSinkLocalState::open(RuntimeState* state) {
     _wait_for_dependency_timer = ADD_TIMER_WITH_LEVEL(_profile, timer_name, 1);
     _wait_queue_timer =
             ADD_CHILD_TIMER_WITH_LEVEL(_profile, "WaitForRpcBufferQueue", timer_name, 1);
-    auto& p = _parent->cast<ExchangeSinkOperatorX>();
     int local_size = 0;
     for (int i = 0; i < channels.size(); ++i) {
         RETURN_IF_ERROR(channels[i]->open(state));
@@ -297,11 +296,7 @@ Status ExchangeSinkLocalState::open(RuntimeState* state) {
     }
 
     _finish_dependency->block();
-    if (_part_type == TPartitionType::HASH_PARTITIONED ||
-        _part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED ||
-        _part_type == TPartitionType::TABLE_SINK_HASH_PARTITIONED) {
-        RETURN_IF_ERROR(_partitioner->open(state));
-    } else if (_part_type == TPartitionType::TABLET_SINK_SHUFFLE_PARTITIONED) {
+    if (_part_type == TPartitionType::TABLET_SINK_SHUFFLE_PARTITIONED) {
         RETURN_IF_ERROR(_row_distribution.open(_tablet_sink_row_desc));
     }
     return Status::OK();

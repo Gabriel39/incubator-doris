@@ -86,11 +86,7 @@ Status PipelineXTask::prepare(const TPipelineInstanceParams& local_params, const
 
     {
         SCOPED_TIMER(_prepare_timer1);
-        // set sink local state
-        LocalSinkStateInfo info {_task_idx,     _task_profile.get(),
-                                 _sender_id,    get_sink_shared_state().get(),
-                                 _le_state_map, _tsink};
-        RETURN_IF_ERROR(_sink->setup_local_state(_state, info));
+        RETURN_IF_ERROR(_sink->setup_local_state(_state));
         _state->get_query_ctx()->register_query_statistics(
                 _state->get_sink_local_state()->get_query_statistics_ptr());
     }
@@ -102,10 +98,7 @@ Status PipelineXTask::prepare(const TPipelineInstanceParams& local_params, const
             auto* parent_profile = _state->get_sink_local_state()->profile();
             for (int op_idx = _operators.size() - 1; op_idx >= 0; op_idx--) {
                 auto& op = _operators[op_idx];
-                LocalStateInfo info {parent_profile, _scan_ranges,
-                                     get_op_shared_state(op->operator_id()), _le_state_map,
-                                     _task_idx};
-                RETURN_IF_ERROR(op->setup_local_state(_state, info));
+                RETURN_IF_ERROR(op->setup_local_state(_state));
                 parent_profile = _state->get_local_state(op->operator_id())->profile();
                 _state->get_query_ctx()->register_query_statistics(
                         _state->get_local_state(op->operator_id())->get_query_statistics_ptr());
@@ -197,7 +190,9 @@ Status PipelineXTask::_open() {
     _dry_run = _sink->should_dry_run(_state);
     for (auto& o : _operators) {
         auto* local_state = _state->get_local_state(o->operator_id());
-        auto st = local_state->open(_state);
+        LocalStateInfo info {_state->get_sink_local_state()->profile(), _scan_ranges,
+                             get_op_shared_state(o->operator_id()), _le_state_map, _task_idx};
+        auto st = local_state->open(_state, info);
         if (st.is<ErrorCode::PIP_WAIT_FOR_RF>()) {
             DCHECK(_filter_dependency);
             _blocked_dep = _filter_dependency->is_blocked_by(this);
@@ -209,7 +204,11 @@ Status PipelineXTask::_open() {
             RETURN_IF_ERROR(st);
         }
     }
-    RETURN_IF_ERROR(_state->get_sink_local_state()->open(_state));
+    // set sink local state
+    LocalSinkStateInfo info {_task_idx,     _task_profile.get(),
+                             _sender_id,    get_sink_shared_state().get(),
+                             _le_state_map, _tsink};
+    RETURN_IF_ERROR(_state->get_sink_local_state()->open(_state, info));
     RETURN_IF_ERROR(_extract_dependencies());
     _block = doris::vectorized::Block::create_unique();
     _opened = true;

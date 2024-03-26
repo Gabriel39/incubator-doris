@@ -70,10 +70,10 @@ public:
 
     // Do initialization. This step should be executed only once and in bthread, so we can do some
     // lightweight or non-idempotent operations (e.g. init profile, clone expr ctx from operatorX)
-    virtual Status init(RuntimeState* state, LocalStateInfo& info) = 0;
+    virtual Status init(RuntimeState* state) = 0;
     // Do initialization. This step can be executed multiple times, so we should make sure it is
     // idempotent (e.g. wait for runtime filters).
-    virtual Status open(RuntimeState* state) { return Status::OK(); }
+    virtual Status open(RuntimeState* state, LocalStateInfo& info) = 0;
     virtual Status close(RuntimeState* state) = 0;
 
     // If use projection, we should clear `_origin_block`.
@@ -253,7 +253,7 @@ public:
 
     virtual std::string debug_string(RuntimeState* state, int indentation_level = 0) const;
 
-    virtual Status setup_local_state(RuntimeState* state, LocalStateInfo& info) = 0;
+    virtual Status setup_local_state(RuntimeState* state) = 0;
 
     template <class TARGET>
     TARGET& cast() {
@@ -342,7 +342,7 @@ public:
             : OperatorXBase(pool, node_id, operator_id) {};
     ~OperatorX() override = default;
 
-    Status setup_local_state(RuntimeState* state, LocalStateInfo& info) override;
+    Status setup_local_state(RuntimeState* state) override;
     using LocalState = LocalStateType;
     [[nodiscard]] LocalState& get_local_state(RuntimeState* state) const {
         return state->get_local_state(operator_id())->template cast<LocalState>();
@@ -357,7 +357,8 @@ public:
             : PipelineXLocalStateBase(state, parent) {}
     ~PipelineXLocalState() override = default;
 
-    Status init(RuntimeState* state, LocalStateInfo& info) override;
+    Status init(RuntimeState* state) override;
+    Status open(RuntimeState* state, LocalStateInfo& info) override;
 
     virtual std::string name_suffix() const {
         return " (id=" + std::to_string(_parent->node_id()) + ")";
@@ -414,11 +415,11 @@ public:
 
     // Do initialization. This step should be executed only once and in bthread, so we can do some
     // lightweight or non-idempotent operations (e.g. init profile, clone expr ctx from operatorX)
-    virtual Status init(RuntimeState* state, LocalSinkStateInfo& info) = 0;
+    virtual Status init(RuntimeState* state) = 0;
 
     // Do initialization. This step can be executed multiple times, so we should make sure it is
     // idempotent (e.g. wait for runtime filters).
-    virtual Status open(RuntimeState* state) = 0;
+    virtual Status open(RuntimeState* state, LocalSinkStateInfo& info) = 0;
     virtual Status close(RuntimeState* state, Status exec_status) = 0;
 
     [[nodiscard]] virtual std::string debug_string(int indentation_level) const = 0;
@@ -521,8 +522,7 @@ public:
 
     [[nodiscard]] virtual Status sink(RuntimeState* state, vectorized::Block* block, bool eos) = 0;
 
-    [[nodiscard]] virtual Status setup_local_state(RuntimeState* state,
-                                                   LocalSinkStateInfo& info) = 0;
+    [[nodiscard]] virtual Status setup_local_state(RuntimeState* state) = 0;
 
     template <class TARGET>
     TARGET& cast() {
@@ -635,7 +635,7 @@ public:
             : DataSinkOperatorXBase(id, node_id, sources) {}
     ~DataSinkOperatorX() override = default;
 
-    Status setup_local_state(RuntimeState* state, LocalSinkStateInfo& info) override;
+    Status setup_local_state(RuntimeState* state) override;
     std::shared_ptr<BasicSharedState> create_shared_state() const override;
 
     using LocalState = LocalStateType;
@@ -652,9 +652,9 @@ public:
             : PipelineXSinkLocalStateBase(parent, state) {}
     ~PipelineXSinkLocalState() override = default;
 
-    Status init(RuntimeState* state, LocalSinkStateInfo& info) override;
+    Status init(RuntimeState* state) override;
 
-    Status open(RuntimeState* state) override { return Status::OK(); }
+    Status open(RuntimeState* state, LocalSinkStateInfo& info) override;
 
     Status close(RuntimeState* state, Status exec_status) override;
 
@@ -768,9 +768,9 @@ public:
                 state->get_query_ctx());
     }
 
-    Status init(RuntimeState* state, LocalSinkStateInfo& info) override;
+    Status init(RuntimeState* state) override;
 
-    Status open(RuntimeState* state) override;
+    Status open(RuntimeState* state, LocalSinkStateInfo& info) override;
 
     Status sink(RuntimeState* state, vectorized::Block* block, bool eos);
 
