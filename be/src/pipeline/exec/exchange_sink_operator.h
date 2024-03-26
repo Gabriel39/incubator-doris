@@ -271,7 +271,7 @@ private:
                                      vectorized::Block* block, bool eos);
     RuntimeState* _state = nullptr;
 
-    const std::vector<TExpr> _texprs;
+    const std::vector<TExpr>& _texprs;
 
     const RowDescriptor& _row_desc;
 
