@@ -102,6 +102,9 @@ bool ExchangeSinkLocalState::transfer_large_data_by_brpc() const {
 Status ExchangeSinkLocalState::init(RuntimeState* state, LocalSinkStateInfo& info) {
     RETURN_IF_ERROR(Base::init(state, info));
     SCOPED_TIMER(exec_time_counter());
+    _prepare1 = ADD_TIMER(profile(), "Prepare1");
+    _prepare2 = ADD_TIMER(profile(), "Prepare2");
+    _prepare3 = ADD_TIMER(profile(), "Prepare3");
     SCOPED_TIMER(_open_timer);
     _sender_id = info.sender_id;
 
@@ -125,34 +128,128 @@ Status ExchangeSinkLocalState::init(RuntimeState* state, LocalSinkStateInfo& inf
             "");
     _merge_block_timer = ADD_TIMER(profile(), "MergeBlockTime");
     _local_bytes_send_counter = ADD_COUNTER(_profile, "LocalBytesSent", TUnit::BYTES);
+
+    auto& p = _parent->cast<ExchangeSinkOperatorX>();
+    _part_type = p._part_type;
+
+    {
+        SCOPED_TIMER(_prepare1);
+        channel_shared_ptrs.resize(p._dests.size());
+        channels.resize(_part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED
+                                ? 0
+                                : p._dests.size());
+        for (int i = 0; i < p._dests.size(); ++i) {
+            if (_part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED) {
+                std::map<int64_t, int64_t> fragment_id_to_channel_index;
+                const auto& fragment_instance_id = p._dests[i].fragment_instance_id;
+                if (fragment_id_to_channel_index.find(fragment_instance_id.lo) ==
+                    fragment_id_to_channel_index.end()) {
+                    channel_shared_ptrs[i].reset(new vectorized::PipChannel<ExchangeSinkLocalState>(
+                            this, p._row_desc, p._dests[i].brpc_server, fragment_instance_id,
+                            p._dest_node_id));
+                    fragment_id_to_channel_index.emplace(fragment_instance_id.lo,
+                                                         channel_shared_ptrs.size() - 1);
+                    channels.push_back(channel_shared_ptrs.back().get());
+                } else {
+                    channel_shared_ptrs[i] = channel_shared_ptrs
+                            [fragment_id_to_channel_index[fragment_instance_id.lo]];
+                }
+            } else {
+                const auto& fragment_instance_id = p._dests[i].fragment_instance_id;
+                channel_shared_ptrs[i].reset(new vectorized::PipChannel<ExchangeSinkLocalState>(
+                        this, p._row_desc, p._dests[i].brpc_server, fragment_instance_id,
+                        p._dest_node_id));
+                channels[i] = channel_shared_ptrs[i].get();
+            }
+        }
+    }
+    for (int i = 0; i < channels.size(); ++i) {
+        SCOPED_TIMER(_prepare2);
+        RETURN_IF_ERROR(channels[i]->init_stub(state));
+    }
+
+    return Status::OK();
+}
+
+Status ExchangeSinkLocalState::open(RuntimeState* state) {
+    RETURN_IF_ERROR(Base::open(state));
+    SCOPED_CONSUME_MEM_TRACKER(_mem_tracker.get());
+
+    {
+        SCOPED_TIMER(_prepare3);
+        if (_part_type == TPartitionType::HASH_PARTITIONED) {
+            _partition_count = channels.size();
+            RETURN_IF_ERROR(p._partitioner->clone(state, _partitioner));
+            _profile->add_info_string("Partitioner",
+                                      fmt::format("Crc32HashPartitioner({})", _partition_count));
+        } else if (_part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED) {
+            _partition_count = channel_shared_ptrs.size();
+            RETURN_IF_ERROR(p._partitioner->clone(state, _partitioner));
+            _profile->add_info_string("Partitioner",
+                                      fmt::format("Crc32HashPartitioner({})", _partition_count));
+        } else if (_part_type == TPartitionType::TABLET_SINK_SHUFFLE_PARTITIONED) {
+            _partition_count = channels.size();
+            _profile->add_info_string("Partitioner",
+                                      fmt::format("Crc32HashPartitioner({})", _partition_count));
+            _txn_id = p._tablet_sink_txn_id;
+            _schema = std::make_shared<OlapTableSchemaParam>();
+            RETURN_IF_ERROR(_schema->init(p._tablet_sink_schema));
+            _vpartition =
+                    std::make_unique<VOlapTablePartitionParam>(_schema, p._tablet_sink_partition);
+            RETURN_IF_ERROR(_vpartition->init());
+            auto find_tablet_mode =
+                    vectorized::OlapTabletFinder::FindTabletMode::FIND_TABLET_EVERY_ROW;
+            _tablet_finder = std::make_unique<vectorized::OlapTabletFinder>(_vpartition.get(),
+                                                                            find_tablet_mode);
+            _tablet_sink_tuple_desc =
+                    _state->desc_tbl().get_tuple_descriptor(p._tablet_sink_tuple_id);
+            _tablet_sink_row_desc = p._pool->add(new RowDescriptor(_tablet_sink_tuple_desc, false));
+            //_block_convertor no need init_autoinc_info here
+            _block_convertor =
+                    std::make_unique<vectorized::OlapTableBlockConvertor>(_tablet_sink_tuple_desc);
+            _location = p._pool->add(new OlapTableLocationParam(p._tablet_sink_location));
+            _row_distribution.init({.state = _state,
+                                    .block_convertor = _block_convertor.get(),
+                                    .tablet_finder = _tablet_finder.get(),
+                                    .vpartition = _vpartition.get(),
+                                    .add_partition_request_timer = _add_partition_request_timer,
+                                    .txn_id = _txn_id,
+                                    .pool = p._pool.get(),
+                                    .location = _location,
+                                    .vec_output_expr_ctxs = &_fake_expr_ctxs,
+                                    .schema = _schema,
+                                    .caller = (void*)this,
+                                    .create_partition_callback =
+                                            &ExchangeSinkLocalState::empty_callback_function});
+        } else if (_part_type == TPartitionType::TABLE_SINK_HASH_PARTITIONED) {
+            _partition_count = channels.size() *
+                               config::table_sink_partition_write_max_partition_nums_per_writer;
+            RETURN_IF_ERROR(p._partitioner->clone(state, _partitioner));
+            _partition_function.reset(new HashPartitionFunction(_partitioner.get()));
+            //        const long MEGABYTE = 1024 * 1024;
+            //        const long MIN_PARTITION_DATA_PROCESSED_REBALANCE_THRESHOLD = 10000 * MEGABYTE; // 1MB
+            //        const long MIN_DATA_PROCESSED_REBALANCE_THRESHOLD = 50000 * MEGABYTE;           // 50MB
+
+            //        const long MIN_PARTITION_DATA_PROCESSED_REBALANCE_THRESHOLD = 1; // 1MB
+            //        const long MIN_DATA_PROCESSED_REBALANCE_THRESHOLD = 1;           // 50MB
+            scale_writer_partitioning_exchanger.reset(new vectorized::ScaleWriterPartitioningExchanger<
+                                                      HashPartitionFunction>(
+                    channels.size(), *_partition_function, _partition_count, channels.size(), 1,
+                    config::table_sink_partition_write_data_processed_threshold,
+                    config::table_sink_partition_write_skewed_data_processed_rebalance_threshold));
+            _profile->add_info_string("Partitioner",
+                                      fmt::format("Crc32HashPartitioner({})", _partition_count));
+        }
+    }
+
     static const std::string timer_name = "WaitForDependencyTime";
     _wait_for_dependency_timer = ADD_TIMER_WITH_LEVEL(_profile, timer_name, 1);
     _wait_queue_timer =
             ADD_CHILD_TIMER_WITH_LEVEL(_profile, "WaitForRpcBufferQueue", timer_name, 1);
-
     auto& p = _parent->cast<ExchangeSinkOperatorX>();
-    _part_type = p._part_type;
-    std::map<int64_t, int64_t> fragment_id_to_channel_index;
-    for (int i = 0; i < p._dests.size(); ++i) {
-        const auto& fragment_instance_id = p._dests[i].fragment_instance_id;
-        if (fragment_id_to_channel_index.find(fragment_instance_id.lo) ==
-            fragment_id_to_channel_index.end()) {
-            channel_shared_ptrs.emplace_back(new vectorized::PipChannel<ExchangeSinkLocalState>(
-                    this, p._row_desc, p._dests[i].brpc_server, fragment_instance_id,
-                    p._dest_node_id));
-            fragment_id_to_channel_index.emplace(fragment_instance_id.lo,
-                                                 channel_shared_ptrs.size() - 1);
-            channels.push_back(channel_shared_ptrs.back().get());
-        } else {
-            channel_shared_ptrs.emplace_back(
-                    channel_shared_ptrs[fragment_id_to_channel_index[fragment_instance_id.lo]]);
-        }
-    }
-    SCOPED_CONSUME_MEM_TRACKER(_mem_tracker.get());
-
     int local_size = 0;
     for (int i = 0; i < channels.size(); ++i) {
-        RETURN_IF_ERROR(channels[i]->init(state));
+        RETURN_IF_ERROR(channels[i]->open(state));
         if (channels[i]->is_local()) {
             local_size++;
         }
@@ -203,83 +300,8 @@ Status ExchangeSinkLocalState::init(RuntimeState* state, LocalSinkStateInfo& inf
             }
         }
     }
-    if (_part_type == TPartitionType::HASH_PARTITIONED) {
-        _partition_count = channels.size();
-        _partitioner.reset(
-                new vectorized::Crc32HashPartitioner<LocalExchangeChannelIds>(channels.size()));
-        RETURN_IF_ERROR(_partitioner->init(p._texprs));
-        RETURN_IF_ERROR(_partitioner->prepare(state, p._row_desc));
-        _profile->add_info_string("Partitioner",
-                                  fmt::format("Crc32HashPartitioner({})", _partition_count));
-    } else if (_part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED) {
-        _partition_count = channel_shared_ptrs.size();
-        _partitioner.reset(new vectorized::Crc32HashPartitioner<vectorized::ShuffleChannelIds>(
-                channel_shared_ptrs.size()));
-        RETURN_IF_ERROR(_partitioner->init(p._texprs));
-        RETURN_IF_ERROR(_partitioner->prepare(state, p._row_desc));
-        _profile->add_info_string("Partitioner",
-                                  fmt::format("Crc32HashPartitioner({})", _partition_count));
-    } else if (_part_type == TPartitionType::TABLET_SINK_SHUFFLE_PARTITIONED) {
-        _partition_count = channels.size();
-        _profile->add_info_string("Partitioner",
-                                  fmt::format("Crc32HashPartitioner({})", _partition_count));
-        _txn_id = p._tablet_sink_txn_id;
-        _schema = std::make_shared<OlapTableSchemaParam>();
-        RETURN_IF_ERROR(_schema->init(p._tablet_sink_schema));
-        _vpartition = std::make_unique<VOlapTablePartitionParam>(_schema, p._tablet_sink_partition);
-        RETURN_IF_ERROR(_vpartition->init());
-        auto find_tablet_mode = vectorized::OlapTabletFinder::FindTabletMode::FIND_TABLET_EVERY_ROW;
-        _tablet_finder =
-                std::make_unique<vectorized::OlapTabletFinder>(_vpartition.get(), find_tablet_mode);
-        _tablet_sink_tuple_desc = _state->desc_tbl().get_tuple_descriptor(p._tablet_sink_tuple_id);
-        _tablet_sink_row_desc = p._pool->add(new RowDescriptor(_tablet_sink_tuple_desc, false));
-        //_block_convertor no need init_autoinc_info here
-        _block_convertor =
-                std::make_unique<vectorized::OlapTableBlockConvertor>(_tablet_sink_tuple_desc);
-        _location = p._pool->add(new OlapTableLocationParam(p._tablet_sink_location));
-        _row_distribution.init(
-                {.state = _state,
-                 .block_convertor = _block_convertor.get(),
-                 .tablet_finder = _tablet_finder.get(),
-                 .vpartition = _vpartition.get(),
-                 .add_partition_request_timer = _add_partition_request_timer,
-                 .txn_id = _txn_id,
-                 .pool = p._pool.get(),
-                 .location = _location,
-                 .vec_output_expr_ctxs = &_fake_expr_ctxs,
-                 .schema = _schema,
-                 .caller = (void*)this,
-                 .create_partition_callback = &ExchangeSinkLocalState::empty_callback_function});
-    } else if (_part_type == TPartitionType::TABLE_SINK_HASH_PARTITIONED) {
-        _partition_count =
-                channels.size() * config::table_sink_partition_write_max_partition_nums_per_writer;
-        _partitioner.reset(
-                new vectorized::Crc32HashPartitioner<LocalExchangeChannelIds>(_partition_count));
-        _partition_function.reset(new HashPartitionFunction(_partitioner.get()));
-        //        const long MEGABYTE = 1024 * 1024;
-        //        const long MIN_PARTITION_DATA_PROCESSED_REBALANCE_THRESHOLD = 10000 * MEGABYTE; // 1MB
-        //        const long MIN_DATA_PROCESSED_REBALANCE_THRESHOLD = 50000 * MEGABYTE;           // 50MB
-
-        //        const long MIN_PARTITION_DATA_PROCESSED_REBALANCE_THRESHOLD = 1; // 1MB
-        //        const long MIN_DATA_PROCESSED_REBALANCE_THRESHOLD = 1;           // 50MB
-        scale_writer_partitioning_exchanger.reset(new vectorized::ScaleWriterPartitioningExchanger<
-                                                  HashPartitionFunction>(
-                channels.size(), *_partition_function, _partition_count, channels.size(), 1,
-                config::table_sink_partition_write_data_processed_threshold,
-                config::table_sink_partition_write_skewed_data_processed_rebalance_threshold));
-        RETURN_IF_ERROR(_partitioner->init(p._texprs));
-        RETURN_IF_ERROR(_partitioner->prepare(state, p._row_desc));
-        _profile->add_info_string("Partitioner",
-                                  fmt::format("Crc32HashPartitioner({})", _partition_count));
-    }
 
     _finish_dependency->block();
-
-    return Status::OK();
-}
-
-Status ExchangeSinkLocalState::open(RuntimeState* state) {
-    RETURN_IF_ERROR(Base::open(state));
     if (_part_type == TPartitionType::HASH_PARTITIONED ||
         _part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED ||
         _part_type == TPartitionType::TABLE_SINK_HASH_PARTITIONED) {
@@ -361,12 +383,33 @@ Status ExchangeSinkOperatorX::init(const TDataSink& tsink) {
 Status ExchangeSinkOperatorX::prepare(RuntimeState* state) {
     _state = state;
     _mem_tracker = std::make_unique<MemTracker>("ExchangeSinkOperatorX:");
+    if (_part_type == TPartitionType::HASH_PARTITIONED) {
+        _partitioner.reset(
+                new vectorized::Crc32HashPartitioner<LocalExchangeChannelIds>(_dests.size()));
+        RETURN_IF_ERROR(_partitioner->init(_texprs));
+        RETURN_IF_ERROR(_partitioner->prepare(state, _row_desc));
+    } else if (_part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED) {
+        _partitioner.reset(
+                new vectorized::Crc32HashPartitioner<vectorized::ShuffleChannelIds>(_dests.size()));
+        RETURN_IF_ERROR(_partitioner->init(_texprs));
+        RETURN_IF_ERROR(_partitioner->prepare(state, _row_desc));
+    } else if (_part_type == TPartitionType::TABLE_SINK_HASH_PARTITIONED) {
+        _partitioner.reset(new vectorized::Crc32HashPartitioner<LocalExchangeChannelIds>(
+                _dests.size() * config::table_sink_partition_write_max_partition_nums_per_writer));
+        RETURN_IF_ERROR(_partitioner->init(_texprs));
+        RETURN_IF_ERROR(_partitioner->prepare(state, _row_desc));
+    }
     return Status::OK();
 }
 
 Status ExchangeSinkOperatorX::open(RuntimeState* state) {
     DCHECK(state != nullptr);
     _compression_type = state->fragement_transmission_compression_type();
+    if (_part_type == TPartitionType::HASH_PARTITIONED ||
+        _part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED ||
+        _part_type == TPartitionType::TABLE_SINK_HASH_PARTITIONED) {
+        _partitioner->open(state);
+    }
     return Status::OK();
 }
 

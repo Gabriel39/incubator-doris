@@ -274,9 +274,6 @@ public:
               _is_local((_brpc_dest_addr.hostname == BackendOptions::get_localhost()) &&
                         (_brpc_dest_addr.port == config::brpc_port)),
               _serializer(_parent, _is_local) {
-        if (_is_local) {
-            VLOG_NOTICE << "will use local Exchange, dest_node_id is : " << _dest_node_id;
-        }
         _ch_cur_pb_block = &_ch_pb_block1;
     }
 
@@ -285,6 +282,10 @@ public:
     // Initialize channel.
     // Returns OK if successful, error indication otherwise.
     Status init(RuntimeState* state);
+
+    // We split initialization into 2 steps in pipelineX (init_stub and open).
+    Status init_stub(RuntimeState* state);
+    Status open(RuntimeState* state);
 
     // Asynchronously sends a row batch.
     // Returns the status of the most recently finished transmit_data

@@ -218,6 +218,13 @@ private:
 
     std::atomic<bool> _finished {false};
     std::mutex _release_lock;
+    std::vector<TScanRangeParams> _scan_ranges;
+    int _sender_id = 0;
+    TDataSink _tsink;
+
+    RuntimeProfile::Counter* _prepare_timer1 = nullptr;
+    RuntimeProfile::Counter* _prepare_timer2 = nullptr;
+    RuntimeProfile::Counter* _prepare_timer3 = nullptr;
 };
 
 } // namespace doris::pipeline

@@ -176,6 +176,9 @@ private:
     // Used to counter send bytes under local data exchange
     RuntimeProfile::Counter* _local_bytes_send_counter = nullptr;
     RuntimeProfile::Counter* _merge_block_timer = nullptr;
+    RuntimeProfile::Counter* _prepare1 = nullptr;
+    RuntimeProfile::Counter* _prepare2 = nullptr;
+    RuntimeProfile::Counter* _prepare3 = nullptr;
 
     RuntimeProfile::Counter* _wait_queue_timer = nullptr;
     RuntimeProfile::Counter* _wait_broadcast_buffer_timer = nullptr;
@@ -268,7 +271,7 @@ private:
                                      vectorized::Block* block, bool eos);
     RuntimeState* _state = nullptr;
 
-    const std::vector<TExpr>& _texprs;
+    const std::vector<TExpr> _texprs;
 
     const RowDescriptor& _row_desc;
 
@@ -302,6 +305,8 @@ private:
     // Control the number of channels according to the flow, thereby controlling the number of table sink writers.
     size_t _data_processed = 0;
     int _writer_count = 1;
+
+    std::unique_ptr<vectorized::PartitionerBase> _partitioner = nullptr;
 };
 
 } // namespace pipeline

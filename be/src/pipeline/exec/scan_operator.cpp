@@ -112,38 +112,47 @@ bool ScanLocalState<Derived>::should_run_serial() const {
 template <typename Derived>
 Status ScanLocalState<Derived>::init(RuntimeState* state, LocalStateInfo& info) {
     RETURN_IF_ERROR(PipelineXLocalState<>::init(state, info));
+    SCOPED_TIMER(_open_timer);
+    _prepare_timer = ADD_TIMER(_runtime_profile, "PrepareTime");
+    _prepare_timer1 = ADD_TIMER(_runtime_profile, "PrepareTime1");
+    _prepare_timer2 = ADD_TIMER(_runtime_profile, "PrepareTime2");
+    _prepare_timer3 = ADD_TIMER(_runtime_profile, "PrepareTime3");
+
     _scan_dependency =
             Dependency::create_shared(_parent->operator_id(), _parent->node_id(),
                                       _parent->get_name() + "_DEPENDENCY", state->get_query_ctx());
     _wait_for_dependency_timer = ADD_TIMER_WITH_LEVEL(
             _runtime_profile, "WaitForDependency[" + _scan_dependency->name() + "]Time", 1);
     SCOPED_TIMER(exec_time_counter());
-    SCOPED_TIMER(_open_timer);
     auto& p = _parent->cast<typename Derived::Parent>();
-    RETURN_IF_ERROR(RuntimeFilterConsumer::init(state, p.ignore_data_distribution()));
-
-    _common_expr_ctxs_push_down.resize(p._common_expr_ctxs_push_down.size());
-    for (size_t i = 0; i < _common_expr_ctxs_push_down.size(); i++) {
-        RETURN_IF_ERROR(
-                p._common_expr_ctxs_push_down[i]->clone(state, _common_expr_ctxs_push_down[i]));
+    {
+        SCOPED_TIMER(_prepare_timer);
+        RETURN_IF_ERROR(RuntimeFilterConsumer::init(state, p.ignore_data_distribution()));
     }
-    _stale_expr_ctxs.resize(p._stale_expr_ctxs.size());
-    for (size_t i = 0; i < _stale_expr_ctxs.size(); i++) {
-        RETURN_IF_ERROR(p._stale_expr_ctxs[i]->clone(state, _stale_expr_ctxs[i]));
-    }
-    // init profile for runtime filter
-    RuntimeFilterConsumer::_init_profile(profile());
-    init_runtime_filter_dependency(_filter_dependency.get());
 
-    // 1: running at not pipeline mode will init profile.
-    // 2: the scan node should create scanner at pipeline mode will init profile.
-    // during pipeline mode with more instances, olap scan node maybe not new VScanner object,
-    // so the profile of VScanner and SegmentIterator infos are always empty, could not init those.
-    RETURN_IF_ERROR(_init_profile());
-    set_scan_ranges(state, info.scan_ranges);
-    // if you want to add some profile in scan node, even it have not new VScanner object
-    // could add here, not in the _init_profile() function
-    _prepare_rf_timer(_runtime_profile.get());
+    {
+        SCOPED_TIMER(_prepare_timer1);
+        _common_expr_ctxs_push_down.resize(p._common_expr_ctxs_push_down.size());
+        for (size_t i = 0; i < _common_expr_ctxs_push_down.size(); i++) {
+            RETURN_IF_ERROR(
+                    p._common_expr_ctxs_push_down[i]->clone(state, _common_expr_ctxs_push_down[i]));
+        }
+        _stale_expr_ctxs.resize(p._stale_expr_ctxs.size());
+        for (size_t i = 0; i < _stale_expr_ctxs.size(); i++) {
+            RETURN_IF_ERROR(p._stale_expr_ctxs[i]->clone(state, _stale_expr_ctxs[i]));
+        }
+    }
+    {
+        SCOPED_TIMER(_prepare_timer2);
+        // init profile for runtime filter
+        RuntimeFilterConsumer::_init_profile(profile());
+        init_runtime_filter_dependency(_filter_dependency.get());
+    }
+
+    {
+        SCOPED_TIMER(_prepare_timer3);
+        set_scan_ranges(state, info.scan_ranges);
+    }
 
     _wait_for_rf_timer = ADD_TIMER(_runtime_profile, "WaitForRuntimeFilter");
     return Status::OK();
@@ -156,6 +165,14 @@ Status ScanLocalState<Derived>::open(RuntimeState* state) {
     if (_opened) {
         return Status::OK();
     }
+    // 1: running at not pipeline mode will init profile.
+    // 2: the scan node should create scanner at pipeline mode will init profile.
+    // during pipeline mode with more instances, olap scan node maybe not new VScanner object,
+    // so the profile of VScanner and SegmentIterator infos are always empty, could not init those.
+    RETURN_IF_ERROR(_init_profile());
+    // if you want to add some profile in scan node, even it have not new VScanner object
+    // could add here, not in the _init_profile() function
+    _prepare_rf_timer(_runtime_profile.get());
     RETURN_IF_ERROR(_acquire_runtime_filter());
     RETURN_IF_ERROR(_process_conjuncts());
 
