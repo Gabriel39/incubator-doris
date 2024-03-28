@@ -105,9 +105,6 @@ Status PipelineXTask::prepare(const TPipelineInstanceParams& local_params, const
         query_ctx->register_query_statistics(
                 _state->get_local_state(op->operator_id())->get_query_statistics_ptr());
     }
-
-    _block = doris::vectorized::Block::create_unique();
-    RETURN_IF_ERROR(_extract_dependencies());
     // We should make sure initial state for task are runnable so that we can do some preparation jobs (e.g. initialize runtime filters).
     set_state(PipelineTaskState::RUNNABLE);
     _prepared = true;
@@ -202,6 +199,8 @@ Status PipelineXTask::_open() {
         }
     }
     RETURN_IF_ERROR(_state->get_sink_local_state()->open(_state));
+    _block = doris::vectorized::Block::create_unique();
+    RETURN_IF_ERROR(_extract_dependencies());
     _opened = true;
     return Status::OK();
 }

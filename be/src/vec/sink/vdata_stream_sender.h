@@ -286,6 +286,10 @@ public:
     // Returns OK if successful, error indication otherwise.
     Status init(RuntimeState* state);
 
+    // `init` is split to `init_stub` and `open` which is in plan prepare phase and open phase separately on pipelineX.
+    Status init_stub(RuntimeState* state);
+    Status open(RuntimeState* state);
+
     // Asynchronously sends a row batch.
     // Returns the status of the most recently finished transmit_data
     // rpc (or OK if there wasn't one that hasn't been reported yet).
