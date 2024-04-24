@@ -23,12 +23,7 @@ import org.apache.doris.nereids.cost.CostCalculator;
 import org.apache.doris.nereids.jobs.JobContext;
 import org.apache.doris.nereids.memo.GroupExpression;
 import org.apache.doris.nereids.properties.DistributionSpecHash.ShuffleType;
-import org.apache.doris.nereids.trees.expressions.AggregateExpression;
-import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.ExprId;
-import org.apache.doris.nereids.trees.expressions.Expression;
-import org.apache.doris.nereids.trees.expressions.SlotReference;
-import org.apache.doris.nereids.trees.expressions.functions.agg.MultiDistinction;
 import org.apache.doris.nereids.trees.plans.AggMode;
 import org.apache.doris.nereids.trees.plans.JoinType;
 import org.apache.doris.nereids.trees.plans.Plan;
@@ -54,7 +49,6 @@ import com.google.common.collect.Lists;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * ensure child add enough distribute. update children properties if we do regular.
@@ -129,44 +123,6 @@ public class ChildrenPropertiesRegulator extends PlanVisitor<Boolean, Void> {
                 && children.get(0).getPlan() instanceof PhysicalUnion
                 && !((PhysicalUnion) children.get(0).getPlan()).isDistinct()) {
             return false;
-        }
-        // forbid multi distinct opt that bad than multi-stage version when multi-stage can be executed in one fragment
-        if (agg.getAggMode() == AggMode.INPUT_TO_BUFFER || agg.getAggMode() == AggMode.INPUT_TO_RESULT) {
-            List<MultiDistinction> multiDistinctions = agg.getOutputExpressions().stream()
-                    .filter(Alias.class::isInstance)
-                    .map(a -> ((Alias) a).child())
-                    .filter(AggregateExpression.class::isInstance)
-                    .map(a -> ((AggregateExpression) a).getFunction())
-                    .filter(MultiDistinction.class::isInstance)
-                    .map(MultiDistinction.class::cast)
-                    .collect(Collectors.toList());
-            if (multiDistinctions.size() == 1) {
-                Expression distinctChild = multiDistinctions.get(0).child(0);
-                DistributionSpec childDistribution = childrenProperties.get(0).getDistributionSpec();
-                if (distinctChild instanceof SlotReference && childDistribution instanceof DistributionSpecHash) {
-                    SlotReference slotReference = (SlotReference) distinctChild;
-                    DistributionSpecHash distributionSpecHash = (DistributionSpecHash) childDistribution;
-                    List<ExprId> groupByColumns = agg.getGroupByExpressions().stream()
-                            .map(SlotReference.class::cast)
-                            .map(SlotReference::getExprId)
-                            .collect(Collectors.toList());
-                    DistributionSpecHash groupByRequire = new DistributionSpecHash(
-                            groupByColumns, ShuffleType.REQUIRE);
-                    List<ExprId> distinctChildColumns = Lists.newArrayList(slotReference.getExprId());
-                    distinctChildColumns.add(slotReference.getExprId());
-                    DistributionSpecHash distinctChildRequire = new DistributionSpecHash(
-                            distinctChildColumns, ShuffleType.REQUIRE);
-                    if ((!groupByColumns.isEmpty() && distributionSpecHash.satisfy(groupByRequire))
-                            || (groupByColumns.isEmpty() && distributionSpecHash.satisfy(distinctChildRequire))) {
-                        return false;
-                    }
-                }
-                // if distinct without group by key, we prefer three or four stage distinct agg
-                // because the second phase of multi-distinct only have one instance, and it is slow generally.
-                if (agg.getOutputExpressions().size() == 1 && agg.getGroupByExpressions().isEmpty()) {
-                    return false;
-                }
-            }
         }
         // process must shuffle
         visit(agg, context);
