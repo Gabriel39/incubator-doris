@@ -297,7 +297,11 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             if (hashAggregate.getAggPhase() == AggPhase.LOCAL
                     && hashAggregate.getAggMode() == AggMode.INPUT_TO_BUFFER) {
                 AggregationNode aggregationNode = (AggregationNode) inputFragment.getPlanRoot();
-                aggregationNode.setUseStreamingPreagg(hashAggregate.isMaybeUsingStream());
+                if (aggregationNode.isReplaceDistinct()) {
+                    aggregationNode.setUseStreamingPreagg(false);
+                } else {
+                    aggregationNode.setUseStreamingPreagg(hashAggregate.isMaybeUsingStream());
+                }
             }
         }
 
@@ -996,6 +1000,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         List<Expression> groupByExpressions = aggregate.getGroupByExpressions();
         List<NamedExpression> outputExpressions = aggregate.getOutputExpressions();
 
+        boolean replaceDistinctFunction = false;
         // ATTN: this is a trick optimize to skip multi_distinct_xxx function build set on second phase
         if (aggregate.getAggMode() == AggMode.INPUT_TO_BUFFER && aggregate.getAggPhase() == AggPhase.LOCAL) {
             // change first phase multi_distinct_count to multi_distinct_count_distribute_by_key
@@ -1013,8 +1018,9 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             for (NamedExpression beforeUpdateExpr : beforeUpdateOutput) {
                 if (beforeUpdateExpr.anyMatch(MultiDistinctCount.class::isInstance)
                         && distributeExprIds.contains(beforeUpdateExpr.getInputSlotExprIds().iterator().next())) {
-                    outputExpressions.add(
-                            (NamedExpression) beforeUpdateExpr.accept(UpdateFunctionName.INSTANCE, null));
+                    Expression newExpr = beforeUpdateExpr.accept(UpdateFunctionName.INSTANCE, null);
+                    replaceDistinctFunction = newExpr.replaceDistinctCountAggExpr();
+                    outputExpressions.add((NamedExpression) newExpr);
                 } else {
                     outputExpressions.add(beforeUpdateExpr);
                 }
@@ -1108,6 +1114,7 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         AggregationNode aggregationNode = new AggregationNode(context.nextPlanNodeId(),
                 inputPlanFragment.getPlanRoot(), aggInfo);
 
+        aggregationNode.setReplaceDistinct(replaceDistinctFunction);
         aggregationNode.setChildrenDistributeExprLists(distributeExprLists);
 
         aggregationNode.setNereidsId(aggregate.getId());

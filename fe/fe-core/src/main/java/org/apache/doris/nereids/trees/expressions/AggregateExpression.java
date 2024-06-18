@@ -145,6 +145,11 @@ public class AggregateExpression extends Expression implements UnaryExpression {
     }
 
     @Override
+    public boolean replaceDistinctCountAggExpr() {
+        return function.getName().equalsIgnoreCase("multi_distinct_count_distribute_key");
+    }
+
+    @Override
     public int hashCode() {
         return Objects.hash(super.hashCode(), function, aggregateParam, child());
     }

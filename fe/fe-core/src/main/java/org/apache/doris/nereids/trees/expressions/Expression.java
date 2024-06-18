@@ -445,4 +445,13 @@ public abstract class Expression extends AbstractTreeNode<Expression> implements
     protected boolean supportCompareWidthAndDepth() {
         return true;
     }
+
+    public boolean replaceDistinctCountAggExpr() {
+        for (Expression expr : children) {
+            if (expr.replaceDistinctCountAggExpr()) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

@@ -61,6 +61,7 @@ public class AggregationNode extends PlanNode {
     // node is the root node of a distributed aggregation.
     private boolean needsFinalize;
     private boolean isColocate = false;
+    private boolean replaceDistinct = false;
 
     // If true, use streaming preaggregation algorithm. Not valid if this is a merge agg.
     private boolean useStreamingPreagg;
@@ -410,5 +411,13 @@ public class AggregationNode extends PlanNode {
 
     public void setColocate(boolean colocate) {
         isColocate = colocate;
+    }
+
+    public boolean isReplaceDistinct() {
+        return replaceDistinct;
+    }
+
+    public void setReplaceDistinct(boolean replaceDistinct) {
+        this.replaceDistinct = replaceDistinct;
     }
 }
