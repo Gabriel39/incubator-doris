@@ -296,7 +296,7 @@ struct TQueryOptions {
   112: optional i32 max_column_reader_num = 0
 
   113: optional bool enable_force_spill = false;
-  
+  132: optional i32 parallel_prepare_threshold = 0;
   // For cloud, to control if the content would be written into file cache
   1000: optional bool disable_file_cache = false
 }
