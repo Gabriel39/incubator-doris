@@ -719,7 +719,7 @@ Status FragmentMgr::_get_query_ctx(const TPipelineFragmentParamsList& t_request,
         // Create the query fragments context.
         query_ctx = QueryContext::create_shared(query_id, t_request.fragment_num_on_host, _exec_env,
                                                 t_request.query_options, t_request.coord, true,
-                                                t_request.is_nereids);
+                                                t_request.is_nereids, t_request.coord);
         SCOPED_SWITCH_THREAD_MEM_TRACKER_LIMITER(query_ctx->query_mem_tracker);
         RETURN_IF_ERROR(DescriptorTbl::create(&(query_ctx->obj_pool), t_request.desc_tbl,
                                               &(query_ctx->desc_tbl)));
@@ -1049,7 +1049,7 @@ Status FragmentMgr::exec_plan_fragment(const TPipelineFragmentParams& params,
         if (local_params.__isset.runtime_filter_params) {
             if (local_params.__isset.runtime_filter_params) {
                 query_ctx->runtime_filter_mgr()->set_runtime_filter_params(
-                        local_params.runtime_filter_params);
+                        local_params.runtime_filter_params.runtime_filter_merge_addr);
             }
         }
         if (local_params.__isset.topn_filter_source_node_ids) {
@@ -1148,14 +1148,15 @@ Status FragmentMgr::exec_plan_fragment(const TPipelineFragmentParamsList& t_requ
             t_request.query_options.enable_pipeline_engine));
     int64_t duration_ns = 0;
     std::shared_ptr<pipeline::PipelineFragmentContext> context =
-            std::make_shared<pipeline::PipelineFragmentContext>(
+            std::make_shared<pipeline::PipelineXFragmentContext>(
                     query_ctx->query_id(), t_request.params_list[i].fragment_id, query_ctx,
                     _exec_env, cb,
                     std::bind<Status>(std::mem_fn(&FragmentMgr::trigger_pipeline_context_report),
                                       this, std::placeholders::_1, std::placeholders::_2));
     {
         SCOPED_RAW_TIMER(&duration_ns);
-        auto prepare_st = context->prepare(t_request.params_list[i], t_request.query_options);
+        auto prepare_st = context->prepare(t_request.params_list[i], _thread_pool.get(),
+                                           t_request.query_options);
         if (!prepare_st.ok()) {
             context->close_if_prepare_failed(prepare_st);
             query_ctx->set_execution_dependency_ready();
@@ -1189,12 +1190,7 @@ Status FragmentMgr::exec_plan_fragment(const TPipelineFragmentParamsList& t_requ
         query_ctx->set_ready_to_execute_only();
     }
 
-    int64 now = duration_cast<std::chrono::milliseconds>(
-                        std::chrono::system_clock::now().time_since_epoch())
-                        .count();
     {
-        g_fragment_executing_count << 1;
-        g_fragment_last_active_time.set_value(now);
         std::lock_guard<std::mutex> lock(_lock);
         std::vector<TUniqueId> ins_ids;
         context->instance_ids(ins_ids);

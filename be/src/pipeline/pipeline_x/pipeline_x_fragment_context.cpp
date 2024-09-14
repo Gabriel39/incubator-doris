@@ -226,7 +226,6 @@ Status PipelineXFragmentContext::prepare(const doris::TPipelineFragmentParams& r
     _runtime_state->set_total_load_streams(request.total_load_streams);
     _runtime_state->set_num_local_sink(request.num_local_sink);
 
-    const auto& local_params = request.local_params[0];
     _need_local_merge = request.__isset.parallel_instances;
 
     // 2. Build pipelines with operators in this fragment.
@@ -790,7 +789,7 @@ Status PipelineXFragmentContext::_build_pipeline_x_tasks(
         int prepare_done = 0;
         for (size_t i = 0; i < target_size; i++) {
             RETURN_IF_ERROR(thread_pool->submit_func([&, i]() {
-                SCOPED_ATTACH_TASK(_query_ctx.get());
+                SCOPED_ATTACH_TASK_WITH_ID(_query_ctx->query_mem_tracker, _query_id);
                 prepare_status[i] = pre_and_submit(i, this);
                 std::unique_lock<std::mutex> lock(m);
                 prepare_done++;
