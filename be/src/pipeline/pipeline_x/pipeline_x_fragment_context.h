@@ -100,6 +100,8 @@ public:
 
     // Prepare global information including global states and the unique operator tree shared by all pipeline tasks.
     Status prepare(const doris::TPipelineFragmentParams& request, ThreadPool* thread_pool) override;
+    Status prepare(const doris::TPipelineFragmentParams& request, ThreadPool* thread_pool,
+                   const TQueryOptions& query_options) override;
 
     Status submit() override;
 
@@ -124,7 +126,7 @@ public:
 private:
     void _close_fragment_instance() override;
     Status _build_pipeline_x_tasks(const doris::TPipelineFragmentParams& request,
-                                   ThreadPool* thread_pool);
+                                   ThreadPool* thread_pool, const TQueryOptions& query_options);
     Status _add_local_exchange(int pip_idx, int idx, int node_id, ObjectPool* pool,
                                PipelinePtr cur_pipe, DataDistribution data_distribution,
                                bool* do_local_exchange, int num_buckets,

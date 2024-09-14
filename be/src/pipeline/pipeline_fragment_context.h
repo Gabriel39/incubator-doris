@@ -92,6 +92,10 @@ public:
     virtual Status prepare(const doris::TPipelineFragmentParams& request, ThreadPool* thread_pool) {
         return Status::InternalError("Pipeline fragment context do not implement prepare");
     }
+    virtual Status prepare(const doris::TPipelineFragmentParams& request, ThreadPool* thread_pool,
+                           const TQueryOptions& query_options) {
+        return Status::InternalError("Pipeline fragment context do not implement prepare");
+    }
 
     virtual Status submit();
 

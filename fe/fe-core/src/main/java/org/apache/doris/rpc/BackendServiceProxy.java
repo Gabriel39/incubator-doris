@@ -197,7 +197,7 @@ public class BackendServiceProxy {
             builder.setCompact(false);
         }
         // VERSION 3 means we send TPipelineFragmentParamsList
-        builder.setVersion(InternalService.PFragmentRequestVersion.VERSION_3);
+        builder.setVersion(InternalService.PFragmentRequestVersion.VERSION_4);
         return execPlanFragmentsAsync(address, builder.build(), twoPhaseExecution);
     }
 
@@ -208,7 +208,7 @@ public class BackendServiceProxy {
         builder.setRequest(serializedFragments);
         builder.setCompact(true);
         // VERSION 3 means we send TPipelineFragmentParamsList
-        builder.setVersion(InternalService.PFragmentRequestVersion.VERSION_3);
+        builder.setVersion(InternalService.PFragmentRequestVersion.VERSION_4);
         return execPlanFragmentsAsync(address, builder.build(), twoPhaseExecution);
     }
 
