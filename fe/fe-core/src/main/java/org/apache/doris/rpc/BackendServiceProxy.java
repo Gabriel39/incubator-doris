@@ -197,18 +197,19 @@ public class BackendServiceProxy {
             builder.setCompact(false);
         }
         // VERSION 3 means we send TPipelineFragmentParamsList
-        builder.setVersion(InternalService.PFragmentRequestVersion.VERSION_4);
+        builder.setVersion(InternalService.PFragmentRequestVersion.VERSION_3);
         return execPlanFragmentsAsync(address, builder.build(), twoPhaseExecution);
     }
 
     public Future<InternalService.PExecPlanFragmentResult> execPlanFragmentsAsync(TNetworkAddress address,
-            ByteString serializedFragments, boolean twoPhaseExecution) throws RpcException {
+            ByteString serializedFragments, boolean twoPhaseExecution, boolean pipelineX) throws RpcException {
         InternalService.PExecPlanFragmentRequest.Builder builder =
                 InternalService.PExecPlanFragmentRequest.newBuilder();
         builder.setRequest(serializedFragments);
         builder.setCompact(true);
         // VERSION 3 means we send TPipelineFragmentParamsList
-        builder.setVersion(InternalService.PFragmentRequestVersion.VERSION_4);
+        builder.setVersion(pipelineX ? InternalService.PFragmentRequestVersion.VERSION_4
+                : InternalService.PFragmentRequestVersion.VERSION_3);
         return execPlanFragmentsAsync(address, builder.build(), twoPhaseExecution);
     }
 
