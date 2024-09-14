@@ -278,7 +278,9 @@ public class AggregateStrategies implements ImplementationRuleFactory {
             ),
             RuleType.TWO_PHASE_AGGREGATE_SINGLE_DISTINCT_TO_MULTI.build(
                 basePattern
-                    .when(agg -> agg.getDistinctArguments().size() == 1 && couldConvertToMulti(agg))
+                    .when(agg -> agg.getDistinctArguments().size() == 1 && couldConvertToMulti(agg)
+                            && agg.getDistinctArguments().stream()
+                            .allMatch(expr -> expr.getDataType().isNumericType()))
                     .thenApplyMulti(ctx -> twoPhaseAggregateWithMultiDistinct(ctx.root, ctx.connectContext))
             ),
             RuleType.TWO_PHASE_AGGREGATE_WITH_MULTI_DISTINCT.build(
@@ -317,7 +319,9 @@ public class AggregateStrategies implements ImplementationRuleFactory {
              */
             RuleType.FOUR_PHASE_AGGREGATE_WITH_DISTINCT.build(
                 basePattern
-                    .when(agg -> agg.getDistinctArguments().size() == 1)
+                    .when(agg -> agg.getDistinctArguments().size() == 1
+                            && agg.getDistinctArguments().stream()
+                            .anyMatch(expr -> expr.getDataType().isStringLikeType()))
                     .when(agg -> agg.getGroupByExpressions().isEmpty())
                     .thenApplyMulti(ctx -> {
                         Function<List<Expression>, RequireProperties> secondPhaseRequireDistinctHash =
