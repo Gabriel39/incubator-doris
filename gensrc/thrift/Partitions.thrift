@@ -53,6 +53,7 @@ enum TPartitionType {
 }
 
 enum TLocalPartitionType {
+  NOOP = 0,
   // used to resume the global hash distribution because other distribution break the global hash distribution,
   // such as PASSTHROUGH. and then JoinNode can shuffle data by the same hash distribution.
   //
@@ -61,7 +62,7 @@ enum TLocalPartitionType {
   //   Node -> LocalExchangeNode(PASSTHROUGH) → JoinNode →  LocalExchangeNode(GLOBAL_EXECUTION_HASH_SHUFFLE) → JoinNode
   //                  ExchangeNode(BROADCAST) ↗                                                                  ↑
   //                                                                         ExchangeNode(GLOBAL_EXECUTION_HASH_SHUFFLE)
-  GLOBAL_EXECUTION_HASH_SHUFFLE = 0,
+  GLOBAL_EXECUTION_HASH_SHUFFLE = 1,
   // used to rebalance data for rebalance data and add parallelism
   //
   // for example:          look here, need use LOCAL_EXECUTION_HASH_SHUFFLE to rebalance data
@@ -75,14 +76,14 @@ enum TLocalPartitionType {
   // `TPipelineFragmentParams.shuffle_idx_to_instance_idx` is used to mapping partial global instance index to local
   // instance index, and discard the other backend's instance index, the data not belong to the local instance will be
   // discarded, which cause data loss.
-  LOCAL_EXECUTION_HASH_SHUFFLE = 1,
-  BUCKET_HASH_SHUFFLE = 2,
+  LOCAL_EXECUTION_HASH_SHUFFLE = 2,
+  BUCKET_HASH_SHUFFLE = 3,
   // round-robin partition, used to rebalance data for rebalance data and add parallelism
-  PASSTHROUGH = 3,
-  ADAPTIVE_PASSTHROUGH = 4,
-  BROADCAST = 5,
-  PASS_TO_ONE = 6,
-  LOCAL_MERGE_SORT = 7
+  PASSTHROUGH = 4,
+  ADAPTIVE_PASSTHROUGH = 5,
+  BROADCAST = 6,
+  PASS_TO_ONE = 7,
+  LOCAL_MERGE_SORT = 8
 }
 
 enum TDistributionType {
