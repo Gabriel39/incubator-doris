@@ -334,6 +334,7 @@ protected:
     // ScanLocalState owns the ownership of scanner, scanner context only has its weakptr
     std::list<std::shared_ptr<vectorized::ScannerDelegate>> _scanners;
     vectorized::Arena _arena;
+    int _instance_idx = 0;
 };
 
 template <typename LocalStateType>
@@ -432,6 +433,9 @@ protected:
     const int _parallel_tasks = 0;
 
     std::vector<int> _topn_filter_source_node_ids;
+
+    std::shared_ptr<vectorized::ScannerMemShareArbitrator> _mem_arb = nullptr;
+    std::shared_ptr<vectorized::ScannerMemLimiter> _mem_limiter = nullptr;
 };
 
 #include "common/compile_check_end.h"

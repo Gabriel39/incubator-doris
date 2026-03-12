@@ -147,6 +147,7 @@ Status ScanLocalState<Derived>::init(RuntimeState* state, LocalStateInfo& info) 
     set_scan_ranges(state, info.scan_ranges);
 
     _wait_for_rf_timer = ADD_TIMER(common_profile(), "WaitForRuntimeFilter");
+    _instance_idx = info.task_idx;
     return Status::OK();
 }
 
@@ -1017,7 +1018,9 @@ Status ScanLocalState<Derived>::_start_scanners(
     auto& p = _parent->cast<typename Derived::Parent>();
     _scanner_ctx.store(vectorized::ScannerContext::create_shared(
             state(), this, p._output_tuple_desc, p.output_row_descriptor(), scanners, p.limit(),
-            _scan_dependency
+            _scan_dependency, p._mem_arb, p._mem_limiter, _instance_idx,
+            _state->get_query_ctx()->get_query_options().__isset.enable_adaptive_scan &&
+                    _state->get_query_ctx()->get_query_options().enable_adaptive_scan
 #ifdef BE_TEST
             ,
             max_scanners_concurrency(state())
@@ -1185,6 +1188,11 @@ Status ScanOperatorX<LocalStateType>::init(const TPlanNode& tnode, RuntimeState*
     if (query_options.__isset.max_pushdown_conditions_per_column) {
         _max_pushdown_conditions_per_column = query_options.max_pushdown_conditions_per_column;
     }
+    _mem_arb = state->get_query_ctx()->mem_arb();
+    _mem_arb->register_scan_node();
+    _mem_limiter = vectorized::ScannerMemLimiter::create_shared(state->query_id(),
+            state->query_parallel_instance_num(), OperatorX<LocalStateType>::is_serial_operator(),
+            state->get_query_ctx()->get_query_options().mem_limit);
     // tnode.olap_scan_node.push_down_agg_type_opt field is deprecated
     // Introduced a new field : tnode.push_down_agg_type_opt
     //

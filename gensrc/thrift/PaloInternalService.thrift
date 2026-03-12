@@ -439,6 +439,8 @@ struct TQueryOptions {
   200: optional bool enable_adjust_conjunct_order_by_cost;
   // Use paimon-cpp to read Paimon splits on BE
   201: optional bool enable_paimon_cpp_reader = false;
+  202: optional double max_scan_mem_ratio = 0.3;
+  203: optional bool enable_adaptive_scan = false;
 
   // For cloud, to control if the content would be written into file cache
   // In write path, to control if the content would be written into file cache.

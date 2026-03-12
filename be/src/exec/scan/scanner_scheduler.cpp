@@ -67,7 +67,7 @@ Status ScannerScheduler::submit(std::shared_ptr<ScannerContext> ctx,
         return Status::OK();
     }
 
-    scanner_delegate->_scanner->start_wait_worker_timer();
+    scanner_delegate->_scanner->pause();
     TabletStorageType type = scanner_delegate->_scanner->get_storage_type();
     auto sumbit_task = [&]() {
         auto work_func = [scanner_ref = scan_task, ctx]() {
@@ -154,15 +154,14 @@ void ScannerScheduler::_scanner_scan(std::shared_ptr<ScannerContext> ctx,
 #endif
     MonotonicStopWatch max_run_time_watch;
     max_run_time_watch.start();
-    scanner->update_wait_worker_timer();
-    scanner->start_scan_cpu_timer();
+    scanner->resume();
 
     // Counter update need prepare successfully, or it maybe core. For example, olap scanner
     // will open tablet reader during prepare, if not prepare successfully, tablet reader == nullptr.
     bool need_update_profile = scanner->has_prepared();
     auto update_scanner_profile = [&]() {
         if (need_update_profile) {
-            scanner->update_scan_cpu_timer();
+            scanner->pause();
             scanner->update_realtime_counters();
             need_update_profile = false;
         }
@@ -262,6 +261,7 @@ void ScannerScheduler::_scanner_scan(std::shared_ptr<ScannerContext> ctx,
                 _make_sure_virtual_col_is_materialized(scanner, free_block.get());
                 // Projection will truncate useless columns, makes block size change.
                 auto free_block_bytes = free_block->allocated_bytes();
+                ctx->reestimated_block_mem_bytes(cast_set<int64_t>(free_block_bytes));
                 raw_bytes_read += free_block_bytes;
                 if (!scan_task->cached_blocks.empty() &&
                     scan_task->cached_blocks.back().first->rows() + free_block->rows() <=

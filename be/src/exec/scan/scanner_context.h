@@ -59,6 +59,119 @@ class ScannerScheduler;
 class ScannerScheduler;
 class TaskExecutor;
 class TaskHandle;
+struct ScannerMemLimiter;
+
+// Query-level memory arbitrator that distributes memory fairly across all scan contexts
+struct ScannerMemShareArbitrator {
+    ENABLE_FACTORY_CREATOR(ScannerMemShareArbitrator)
+    TUniqueId query_id;
+    int64_t query_mem_limit = 0;
+    int64_t scan_mem_limit = 0;
+    std::atomic<int64_t> total_scanner_mem_bytes = 0;
+
+    ScannerMemShareArbitrator(const TUniqueId& qid, int64_t query_mem_limit, double max_scan_ratio);
+
+    // Update memory allocation when scanner memory usage changes
+    // Returns new scan memory limit for this context
+    int64_t update_scanner_mem_bytes(int64_t old_value, int64_t new_value);
+    void register_scan_node();
+    std::string debug_string() const {
+        return fmt::format("query_id: {}, query_mem_limit: {}, scan_mem_limit: {}",
+                           print_id(query_id), query_mem_limit, scan_mem_limit);
+    }
+};
+
+// Scan-context-level memory limiter that controls scanner concurrency based on memory
+struct ScannerMemLimiter {
+private:
+    TUniqueId query_id;
+    mutable std::mutex lock;
+    // Parallelism of the scan operator
+    const int64_t parallelism = 0;
+    const bool serial_scan = false;
+    const int64_t query_scan_mem_limit;
+    std::atomic<int64_t> running_scanner_count = 0;
+
+    std::atomic<int64_t> estimated_block_mem_bytes = 0;
+    int64_t estimated_block_mem_bytes_update_count = 0;
+    int64_t arb_scanner_mem_bytes = 0;
+    std::atomic<int64_t> open_scanner_context_count = 0;
+
+    // Memory limit for this scan node (shared by all instances), updated by memory share arbitrator
+    std::atomic<int64_t> scan_mem_limit = 0;
+
+public:
+    ENABLE_FACTORY_CREATOR(ScannerMemLimiter)
+    ScannerMemLimiter(const TUniqueId& qid, int64_t parallelism, bool serial_scan,
+                      int64_t mem_limit)
+            : query_id(qid),
+              parallelism(parallelism),
+              serial_scan(serial_scan),
+              query_scan_mem_limit(mem_limit) {}
+
+    // Calculate available scanner count based on memory limit
+    int available_scanner_count(int ins_idx) const;
+
+    int64_t update_running_scanner_count(int delta) { return running_scanner_count += delta; }
+
+    // Re-estimated the average memory usage of a block, and update the estimated_block_mem_bytes accordingly.
+    void reestimated_block_mem_bytes(int64_t value);
+    void update_scan_mem_limit(int64_t value) { scan_mem_limit = value; }
+    void update_arb_scanner_mem_bytes(int64_t value) {
+        value = std::min(value, query_scan_mem_limit);
+        arb_scanner_mem_bytes = value;
+    }
+    int64_t get_arb_scanner_mem_bytes() const { return arb_scanner_mem_bytes; }
+
+    int64_t get_estimated_block_mem_bytes() const { return estimated_block_mem_bytes; }
+
+    int64_t update_open_scanner_context_count(int delta) {
+        return open_scanner_context_count.fetch_add(delta);
+    }
+    std::string debug_string() const {
+        return fmt::format(
+                "query_id: {}, parallelism: {}, serial_scan: {}, query_scan_mem_limit: {}, "
+                "running_scanner_count: {}, estimated_block_mem_bytes: {}, "
+                "estimated_block_mem_bytes_update_count: {}, arb_scanner_mem_bytes: {}, "
+                "open_scanner_context_count: {}, scan_mem_limit: {}",
+                print_id(query_id), parallelism, serial_scan, query_scan_mem_limit,
+                running_scanner_count.load(), estimated_block_mem_bytes.load(),
+                estimated_block_mem_bytes_update_count, arb_scanner_mem_bytes,
+                open_scanner_context_count, scan_mem_limit);
+    }
+};
+
+// Adaptive processor for dynamic scanner concurrency adjustment
+struct ScannerAdaptiveProcessor {
+    ENABLE_FACTORY_CREATOR(ScannerAdaptiveProcessor)
+    ScannerAdaptiveProcessor() = default;
+    ~ScannerAdaptiveProcessor() = default;
+    // Expected scanners in this cycle
+
+    int expected_scanners = 0;
+    // Timing metrics
+    // int64_t context_start_time = 0;
+    // int64_t scanner_total_halt_time = 0;
+    // int64_t scanner_gen_blocks_time = 0;
+    // std::atomic_int64_t scanner_total_io_time = 0;
+    // std::atomic_int64_t scanner_total_running_time = 0;
+    // std::atomic_int64_t scanner_total_scan_bytes = 0;
+
+    // Timestamps
+    // std::atomic_int64_t last_scanner_finish_timestamp = 0;
+    // int64_t check_all_scanners_last_timestamp = 0;
+    // int64_t last_driver_output_full_timestamp = 0;
+    int64_t adjust_scanners_last_timestamp = 0;
+
+    // Adjustment strategy fields
+    // bool try_add_scanners = false;
+    // double expected_speedup_ratio = 0;
+    // double last_scanner_scan_speed = 0;
+    // int64_t last_scanner_total_scan_bytes = 0;
+    // int try_add_scanners_fail_count = 0;
+    // int check_slow_io = 0;
+    // int32_t slow_io_latency_ms = 100; // Default from config
+};
 
 class ScanTask {
 public:
@@ -119,7 +232,10 @@ public:
                    const TupleDescriptor* output_tuple_desc,
                    const RowDescriptor* output_row_descriptor,
                    const std::list<std::shared_ptr<vectorized::ScannerDelegate>>& scanners,
-                   int64_t limit_, std::shared_ptr<pipeline::Dependency> dependency
+                   int64_t limit_, std::shared_ptr<pipeline::Dependency> dependency,
+                   std::shared_ptr<ScannerMemShareArbitrator> arb,
+                   std::shared_ptr<ScannerMemLimiter> limiter, int ins_idx,
+                   bool enable_adaptive_scan
 #ifdef BE_TEST
                    ,
                    int num_parallel_instances
@@ -138,6 +254,7 @@ public:
 
     // Caller should make sure the pipeline task is still running when calling this function
     void update_peak_running_scanner(int num);
+    void reestimated_block_mem_bytes(int64_t num);
 
     // Get next block from blocks queue. Called by ScanNode/ScanOperator
     // Set eos to true if there is no more data to read.
@@ -262,6 +379,19 @@ protected:
 
     int32_t _get_margin(std::unique_lock<std::mutex>& transfer_lock,
                         std::unique_lock<std::shared_mutex>& scheduler_lock);
+
+    // Memory-aware adaptive scheduling
+    std::shared_ptr<ScannerMemLimiter> _scanner_mem_limiter = nullptr;
+    std::shared_ptr<ScannerMemShareArbitrator> _mem_share_arb = nullptr;
+    std::shared_ptr<ScannerAdaptiveProcessor> _adaptive_processor = nullptr;
+    const int _ins_idx;
+    const bool _enable_adaptive_scanners = false;
+
+    // Adjust scan memory limit based on arbitrator feedback
+    void _adjust_scan_mem_limit(int64_t old_scanner_mem_bytes, int64_t new_scanner_mem_bytes);
+
+    // Calculate available scanner count for adaptive scheduling
+    int _available_pickup_scanner_count();
 
     // TODO: Add implementation of runtime_info_feed_back
     // adaptive scan concurrency related end
