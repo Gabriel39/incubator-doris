@@ -966,6 +966,16 @@ static Status merge_filter_projection(const FilterProjectionMap* filter_projecti
     return Status::OK();
 }
 
+static const LocalColumnIndex* find_filter_projection(
+        const FilterProjectionMap* filter_projections, LocalColumnId column_id) {
+    if (filter_projections == nullptr) {
+        return nullptr;
+    }
+    const auto filter_projection_it = filter_projections->find(column_id);
+    return filter_projection_it == filter_projections->end() ? nullptr
+                                                             : &filter_projection_it->second;
+}
+
 static void sort_projection_children_by_file_id(LocalColumnIndex* projection) {
     DORIS_CHECK(projection != nullptr);
     if (projection->project_all_children) {
@@ -1004,11 +1014,19 @@ static Status add_scan_column(FileScanRequest* file_request, ColumnMapping* mapp
     }
     if (is_predicate_column) {
         DCHECK(filter_projections != nullptr);
-        // If a projected complex root is also used by a predicate, rebuild the predicate scan
-        // projection from the output mapping before merging predicate-only children. For
-        // `SELECT s.a WHERE s.b > 1`, build_complex_projection() produces `s -> a` and
-        // merge_filter_projection() adds `s -> b`, so the predicate column reads both children.
-        RETURN_IF_ERROR(merge_filter_projection(filter_projections, &projection));
+        if (remove_nullable(mapping->table_type)->get_primitive_type() == TYPE_MAP) {
+            if (const auto* filter_projection =
+                        find_filter_projection(filter_projections, projection.column_id());
+                filter_projection != nullptr) {
+                projection = *filter_projection;
+            }
+        } else {
+            // If a projected complex root is also used by a predicate, rebuild the predicate scan
+            // projection from the output mapping before merging predicate-only children. For
+            // `SELECT s.a WHERE s.b > 1`, build_complex_projection() produces `s -> a` and
+            // merge_filter_projection() adds `s -> b`, so the predicate column reads both children.
+            RETURN_IF_ERROR(merge_filter_projection(filter_projections, &projection));
+        }
     }
     auto existing_projection_it = std::ranges::find_if(
             *scan_columns,
