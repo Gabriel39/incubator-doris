@@ -1148,8 +1148,8 @@ TEST(IcebergV2ReaderTest, IcebergVirtualColumnsKeepRowLineageAfterRowGroupPredic
     std::filesystem::create_directories(test_dir);
 
     const auto file_path = (test_dir / "split.parquet").string();
-    // ColumnPredicate is used for row-group/statistics pruning. Keep one row per row group so
-    // id > 2 prunes the first two row groups and leaves only the third file-local row.
+    // Keep one row per row group so the VExpr ZoneMap path can prune the first two row groups and
+    // leave only the third file-local row.
     write_int_pair_parquet_file(file_path, {1, 2, 3}, {10, 20, 30}, {"one", "two", "three"}, 1);
 
     std::vector<ColumnDefinition> projected_columns;
@@ -1168,7 +1168,8 @@ TEST(IcebergV2ReaderTest, IcebergVirtualColumnsKeepRowLineageAfterRowGroupPredic
     ASSERT_TRUE(reader.init({
                                     .projected_columns = projected_columns,
                                     .column_predicates = std::move(column_predicates),
-                                    .conjuncts = {},
+                                    .conjuncts = {prepared_conjunct(
+                                            &state, table_int32_greater_than_expr(2, 2, 2))},
                                     .format = FileFormat::PARQUET,
                                     .scan_params = nullptr,
                                     .io_ctx = nullptr,

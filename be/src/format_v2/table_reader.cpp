@@ -596,8 +596,8 @@ bool TableReader::_should_enable_condition_cache(const FileScanRequest& file_req
         return false;
     }
     // Condition cache is populated by file readers after evaluating file-local row-level
-    // conjuncts. ColumnPredicate-only scans can prune row groups/pages, but they do not produce a
-    // per-row survivor bitmap that can safely populate the cache.
+    // conjuncts. Metadata pruning can skip row groups/pages, but it does not produce a per-row
+    // survivor bitmap that can safely populate the cache.
     if (file_request.conjuncts.empty()) {
         return false;
     }

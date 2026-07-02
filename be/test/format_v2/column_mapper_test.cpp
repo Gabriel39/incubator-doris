@@ -960,7 +960,6 @@ TEST(ColumnMapperCollectNestedStructPathsTest, ProjectionMergeKeepsFilterOnlyPat
     EXPECT_EQ(request.predicate_columns[0].column_id(), LocalColumnId(5));
     ASSERT_FALSE(request.predicate_columns[0].project_all_children);
     EXPECT_EQ(projection_ids(request.predicate_columns[0].children), std::vector<int32_t>({0, 1}));
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 // Scenario: row-oriented readers such as CSV/Text cannot lazy-read predicate columns separately.
@@ -996,7 +995,6 @@ TEST(ColumnMapperScanRequestTest, MaterializedMapperUsesSingleScanColumnList) {
     EXPECT_EQ(request.non_predicate_columns[0].column_id(), LocalColumnId(5));
     EXPECT_TRUE(request.non_predicate_columns[0].project_all_children);
     EXPECT_TRUE(request.non_predicate_columns[0].children.empty());
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 // Scenario: a FileReader must expose semantic children for complex file columns. If it returns a
@@ -1051,7 +1049,6 @@ TEST(ColumnMapperScanRequestTest, MaterializedMapperLocalizesMappedStructChildCo
     EXPECT_EQ(request.non_predicate_columns[0].column_id(), LocalColumnId(5));
     EXPECT_TRUE(request.non_predicate_columns[0].project_all_children);
     EXPECT_TRUE(request.non_predicate_columns[0].children.empty());
-    EXPECT_TRUE(request.column_predicate_filters.empty());
     ASSERT_EQ(request.conjuncts.size(), 1);
 }
 
@@ -1079,7 +1076,6 @@ TEST(ColumnMapperScanRequestTest, MaterializedMapperScansFullComplexRootForOutpu
     EXPECT_TRUE(request.non_predicate_columns[0].project_all_children);
     EXPECT_TRUE(request.non_predicate_columns[0].children.empty());
     EXPECT_TRUE(request.predicate_columns.empty());
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 // Scenario: array/map nested projections also scan the full top-level complex root for
@@ -1131,7 +1127,6 @@ TEST(ColumnMapperScanRequestTest, MaterializedMapperScansFullArrayAndMapRoots) {
     EXPECT_TRUE(request.non_predicate_columns[1].project_all_children);
     EXPECT_TRUE(request.non_predicate_columns[1].children.empty());
     EXPECT_TRUE(request.predicate_columns.empty());
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 // ----------------------------------------------------------------------
@@ -2066,7 +2061,6 @@ TEST(ColumnMapperConstantTest, PartitionConstantFilterEntryDoesNotReadFileColumn
     EXPECT_TRUE(request.predicate_columns.empty());
     EXPECT_TRUE(request.non_predicate_columns.empty());
     EXPECT_TRUE(request.conjuncts.empty());
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 TEST(ColumnMapperConstantTest, DefaultConstantFilterEntryUsesDefaultExpression) {
@@ -2190,7 +2184,7 @@ TEST(ColumnMapperLocalizeFiltersTest, ConstantFilterBuildsEntryWithoutFileScanCo
               mapper.mappings()[0].constant_index);
 }
 
-TEST(ColumnMapperLocalizeFiltersTest, ColumnPredicatesUseOnlyExistingLocalPositions) {
+TEST(ColumnMapperLocalizeFiltersTest, ColumnPredicatesDoNotCreateFileScanFilters) {
     const auto int_type = i32();
     const std::vector<ColumnDefinition> table_schema = {name_col("id", int_type)};
     const std::vector<ColumnDefinition> file_schema = {name_col("id", int_type, 3)};
@@ -2204,7 +2198,6 @@ TEST(ColumnMapperLocalizeFiltersTest, ColumnPredicatesUseOnlyExistingLocalPositi
 
     FileScanRequest request_without_local_position;
     ASSERT_TRUE(mapper.localize_filters({}, predicates, &request_without_local_position).ok());
-    EXPECT_TRUE(request_without_local_position.column_predicate_filters.empty());
     ASSERT_EQ(mapper.filter_entries().size(), 1);
     EXPECT_FALSE(mapper.filter_entries().at(GlobalIndex(0)).is_local());
 
@@ -2217,12 +2210,7 @@ TEST(ColumnMapperLocalizeFiltersTest, ColumnPredicatesUseOnlyExistingLocalPositi
     ASSERT_EQ(request_with_local_position.non_predicate_columns.size(), 1);
     EXPECT_EQ(request_with_local_position.non_predicate_columns[0].column_id(), LocalColumnId(3));
     EXPECT_TRUE(request_with_local_position.predicate_columns.empty());
-    ASSERT_EQ(request_with_local_position.column_predicate_filters.size(), 1);
-    EXPECT_EQ(request_with_local_position.column_predicate_filters[0].file_column_id,
-              LocalColumnId(3));
-    ASSERT_EQ(request_with_local_position.column_predicate_filters[0].predicates.size(), 1);
-    EXPECT_EQ(request_with_local_position.column_predicate_filters[0].predicates[0]->type(),
-              PredicateType::GT);
+    EXPECT_TRUE(request_with_local_position.conjuncts.empty());
     ASSERT_TRUE(mapper.filter_entries().at(GlobalIndex(0)).is_local());
     EXPECT_EQ(mapper.filter_entries().at(GlobalIndex(0)).local_index(), LocalIndex(0));
 }
@@ -2260,7 +2248,6 @@ TEST(ColumnMapperLocalizeFiltersTest, NestedFilterOnlyChildMergesIntoPredicatePr
     EXPECT_EQ(request.local_positions.at(LocalColumnId(5)), LocalIndex(0));
     ASSERT_TRUE(mapper.filter_entries().at(GlobalIndex(0)).is_local());
     EXPECT_EQ(mapper.filter_entries().at(GlobalIndex(0)).local_index(), LocalIndex(0));
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 TEST(ColumnMapperLocalizeFiltersTest, PreservesExistingScanStateWhenAddingPredicateColumn) {
@@ -2329,8 +2316,7 @@ TEST(ColumnMapperScanRequestTest, ColumnPredicatesDoNotForceRowPredicateMaterial
     ASSERT_EQ(request.local_positions.size(), 2);
     EXPECT_EQ(request.local_positions.at(LocalColumnId(0)), LocalIndex(0));
     EXPECT_EQ(request.local_positions.at(LocalColumnId(1)), LocalIndex(1));
-    ASSERT_EQ(request.column_predicate_filters.size(), 1);
-    EXPECT_EQ(request.column_predicate_filters[0].file_column_id, LocalColumnId(0));
+    EXPECT_TRUE(request.conjuncts.empty());
 }
 
 TEST(ColumnMapperScanRequestTest, HiddenTopLevelFilterMappingUsesNameFallback) {
@@ -2390,7 +2376,6 @@ TEST(ColumnMapperScanRequestTest, StructOutputAndFilterOnlyChildAreMerged) {
     EXPECT_EQ(request.predicate_columns[0].column_id(), LocalColumnId(5));
     ASSERT_FALSE(request.predicate_columns[0].project_all_children);
     EXPECT_EQ(projection_ids(request.predicate_columns[0].children), std::vector<int32_t>({0, 1}));
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 TEST(ColumnMapperScanRequestTest, RenamedNestedPredicateTargetsMappedFileChild) {
@@ -2413,8 +2398,6 @@ TEST(ColumnMapperScanRequestTest, RenamedNestedPredicateTargetsMappedFileChild) 
 
     FileScanRequest request;
     ASSERT_TRUE(mapper.create_scan_request({filter}, {}, {table_struct}, &request).ok());
-
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 TEST(ColumnMapperScanRequestTest, NestedInNullAndReverseComparisonFiltersAreMerged) {
@@ -2451,8 +2434,6 @@ TEST(ColumnMapperScanRequestTest, NestedInNullAndReverseComparisonFiltersAreMerg
 
     FileScanRequest request;
     ASSERT_TRUE(mapper.create_scan_request({filter}, {}, {table_struct}, &request).ok());
-
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 TEST(ColumnMapperScanRequestTest, NestedPredicateFilterThroughSafeCast) {
@@ -2482,8 +2463,6 @@ TEST(ColumnMapperScanRequestTest, NestedPredicateFilterThroughSafeCast) {
 
     FileScanRequest request;
     ASSERT_TRUE(mapper.create_scan_request({filter}, {}, {table_struct}, &request).ok());
-
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 TEST(ColumnMapperScanRequestTest, UnsafeCastDoesNotBuildNestedPredicateFilter) {
@@ -2512,8 +2491,6 @@ TEST(ColumnMapperScanRequestTest, UnsafeCastDoesNotBuildNestedPredicateFilter) {
 
     FileScanRequest request;
     ASSERT_TRUE(mapper.create_scan_request({filter}, {}, {table_struct}, &request).ok());
-
-    EXPECT_TRUE(request.column_predicate_filters.empty());
     ASSERT_EQ(request.predicate_columns.size(), 1);
     EXPECT_EQ(request.predicate_columns[0].column_id(), LocalColumnId(5));
     EXPECT_EQ(projection_ids(request.predicate_columns[0].children), std::vector<int32_t>({0, 1}));
@@ -2552,8 +2529,6 @@ TEST(ColumnMapperScanRequestTest, DeepNestedPredicateTargetsLeafPath) {
 
     FileScanRequest request;
     ASSERT_TRUE(mapper.create_scan_request({filter}, {}, {table_struct}, &request).ok());
-
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 TEST(ColumnMapperScanRequestTest, ArrayStructProjectionPrunesElementChildren) {
@@ -2705,7 +2680,6 @@ TEST(ColumnMapperScanRequestTest, ArrayWrapperDoesNotBuildNestedPredicateFilter)
     EXPECT_EQ(request.predicate_columns[0].column_id(), LocalColumnId(0));
     EXPECT_TRUE(request.predicate_columns[0].project_all_children);
     EXPECT_TRUE(request.predicate_columns[0].children.empty());
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 // Scenario: a map value struct projects child `b`, while a row filter reads value child `a`.
@@ -2751,7 +2725,6 @@ TEST(ColumnMapperScanRequestTest, MapFilterOnlyValueChildMergesWithOutputProject
     ASSERT_EQ(projection.children.size(), 1);
     EXPECT_EQ(projection.children[0].local_id(), 1);
     EXPECT_EQ(projection_ids(projection.children[0].children), std::vector<int32_t>({0, 1}));
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 // Scenario: when projected struct children are an in-order prefix of the file struct, the mapper can
@@ -2898,7 +2871,6 @@ TEST(ColumnMapperScanRequestTest, PredicateOnlyTopLevelColumnUsesHiddenMapping) 
     EXPECT_TRUE(request.predicate_columns[0].children.empty());
 
     ASSERT_EQ(request.conjuncts.size(), 1);
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 // Scenario: a nested predicate targets a table-side renamed struct field; scan projection must
@@ -2924,8 +2896,6 @@ TEST(ColumnMapperScanRequestTest, NestedPredicateProjectionUsesMappedRenamedChil
 
     FileScanRequest request;
     ASSERT_TRUE(mapper.create_scan_request({filter}, {}, {table_struct}, &request).ok());
-
-    EXPECT_TRUE(request.column_predicate_filters.empty());
     ASSERT_EQ(request.predicate_columns.size(), 1);
     EXPECT_TRUE(request.predicate_columns[0].project_all_children);
     EXPECT_TRUE(request.predicate_columns[0].children.empty());
@@ -3120,7 +3090,6 @@ TEST(ColumnMapperScanRequestTest, MapValuesStructChildConjunctStaysTableLevel) {
     ASSERT_FALSE(request.predicate_columns[0].project_all_children);
     ASSERT_EQ(request.predicate_columns[0].children.size(), 1);
     EXPECT_EQ(request.predicate_columns[0].children[0].local_id(), 1);
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 // Scenario: MAP_KEYS only reads map keys, but localizing it by wrapping the evolved file map slot
@@ -3162,7 +3131,6 @@ TEST(ColumnMapperScanRequestTest, MapKeysConjunctWithEvolvedValueStructStaysTabl
     EXPECT_TRUE(request.non_predicate_columns.empty());
     ASSERT_EQ(request.predicate_columns.size(), 1);
     EXPECT_EQ(request.predicate_columns[0].column_id(), LocalColumnId(1));
-    EXPECT_TRUE(request.column_predicate_filters.empty());
 }
 
 // Scenario: an array element struct projection only contains missing/default children; the mapper

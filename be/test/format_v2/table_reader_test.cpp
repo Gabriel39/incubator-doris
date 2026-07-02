@@ -1499,9 +1499,9 @@ TEST(TableReaderTest, ReopenSplitAfterClose) {
     std::filesystem::remove_all(test_dir);
 }
 
-// Scenario: column predicates are pruning hints only. They do not produce a row-level survivor
-// bitmap, so TableReader must not enable condition cache when the scan request has no conjuncts.
-TEST(TableReaderTest, ConditionCacheSkipsColumnPredicateOnlyRequest) {
+// Scenario: requests without file-local row conjuncts do not produce a row-level survivor bitmap,
+// so TableReader must not enable condition cache even if legacy column predicates are present.
+TEST(TableReaderTest, ConditionCacheSkipsRequestWithoutFileLocalConjuncts) {
     std::vector<ColumnDefinition> file_schema;
     file_schema.push_back(make_file_column(0, "id", std::make_shared<DataTypeInt32>()));
 
@@ -2855,34 +2855,29 @@ TEST(TableReaderTest, OpenReaderBuildsTableFiltersFromConjuncts) {
     std::filesystem::remove_all(test_dir);
 }
 
-TEST(TableReaderTest, OpenReaderBuildsColumnPredicateFilters) {
+TEST(TableReaderTest, OpenReaderPushesVExprPredicateToParquetReader) {
     const auto test_dir =
             std::filesystem::temp_directory_path() / "doris_table_reader_column_predicate_test";
     std::filesystem::remove_all(test_dir);
     std::filesystem::create_directories(test_dir);
 
     const auto file_path = (test_dir / "split.parquet").string();
-    // ColumnPredicate is only used for row-group/statistics pruning. Keep one row per row
-    // group so the predicate can prune the first two row groups and leave only id = 3.
+    // Keep one row per row group so the VExpr ZoneMap path can prune the first two row groups and
+    // leave only id = 3.
     write_int_pair_parquet_file(file_path, {1, 2, 3}, {1, 5, 8}, {"one", "two", "three"}, 1);
 
     std::vector<ColumnDefinition> projected_columns;
     projected_columns.push_back(make_table_column(2, "value", std::make_shared<DataTypeString>()));
     projected_columns.push_back(make_table_column(0, "id", std::make_shared<DataTypeInt32>()));
 
-    TableColumnPredicates column_predicates;
-    add_column_predicate(&column_predicates, GlobalIndex(1),
-                         create_comparison_predicate<PredicateType::GT>(
-                                 0, "id", make_nullable(std::make_shared<DataTypeInt32>()),
-                                 Field::create_field<TYPE_INT>(2), false));
-
     RuntimeState state {TQueryOptions(), TQueryGlobals()};
     set_name_identifiers(&projected_columns);
     TableReader reader;
     ASSERT_TRUE(reader.init({
                                     .projected_columns = projected_columns,
-                                    .column_predicates = std::move(column_predicates),
-                                    .conjuncts = {},
+                                    .column_predicates = {},
+                                    .conjuncts = {prepared_conjunct(
+                                            &state, table_int32_greater_than_expr(1, 1, 2))},
                                     .format = FileFormat::PARQUET,
                                     .scan_params = nullptr,
                                     .io_ctx = nullptr,
@@ -2910,7 +2905,7 @@ TEST(TableReaderTest, OpenReaderBuildsColumnPredicateFilters) {
     std::filesystem::remove_all(test_dir);
 }
 
-TEST(TableReaderTest, ColumnPredicateSurvivesReopenSplit) {
+TEST(TableReaderTest, VExprPredicateSurvivesReopenSplit) {
     const auto test_dir =
             std::filesystem::temp_directory_path() / "doris_table_reader_predicate_reopen_test";
     std::filesystem::remove_all(test_dir);
@@ -2926,19 +2921,14 @@ TEST(TableReaderTest, ColumnPredicateSurvivesReopenSplit) {
     std::vector<ColumnDefinition> projected_columns;
     projected_columns.push_back(make_table_column(0, "id", std::make_shared<DataTypeInt32>()));
 
-    TableColumnPredicates column_predicates;
-    add_column_predicate(&column_predicates, GlobalIndex(0),
-                         create_comparison_predicate<PredicateType::GT>(
-                                 0, "id", make_nullable(std::make_shared<DataTypeInt32>()),
-                                 Field::create_field<TYPE_INT>(2), false));
-
     RuntimeState state {TQueryOptions(), TQueryGlobals()};
     set_name_identifiers(&projected_columns);
     TableReader reader;
     ASSERT_TRUE(reader.init({
                                     .projected_columns = projected_columns,
-                                    .column_predicates = std::move(column_predicates),
-                                    .conjuncts = {},
+                                    .column_predicates = {},
+                                    .conjuncts = {prepared_conjunct(
+                                            &state, table_int32_greater_than_expr(0, 0, 2))},
                                     .format = FileFormat::PARQUET,
                                     .scan_params = nullptr,
                                     .io_ctx = nullptr,
@@ -3082,7 +3072,7 @@ TEST(TableReaderTest, CreateScanRequestUsesColumnNameForByNamePredicateMapping) 
     EXPECT_EQ(localized_slot->column_id(), 1);
 }
 
-TEST(TableReaderTest, ColumnPredicateFilterUsesColumnNameForByNameMapping) {
+TEST(TableReaderTest, ColumnPredicatesDoNotCreateFileScanFilters) {
     const auto int_type = std::make_shared<DataTypeInt32>();
     std::vector<ColumnDefinition> projected_columns = {
             make_table_column(10, "id", int_type),
@@ -3107,10 +3097,9 @@ TEST(TableReaderTest, ColumnPredicateFilterUsesColumnNameForByNameMapping) {
     ASSERT_TRUE(mapper.create_scan_request({}, column_predicates, projected_columns, &file_request)
                         .ok());
 
-    ASSERT_EQ(file_request.column_predicate_filters.size(), 1);
-    EXPECT_EQ(file_request.column_predicate_filters[0].file_column_id.value(), 0);
     EXPECT_EQ(projection_ids(file_request.non_predicate_columns), std::vector<int32_t>({0, 1}));
     EXPECT_TRUE(file_request.predicate_columns.empty());
+    EXPECT_TRUE(file_request.conjuncts.empty());
 }
 
 TEST(TableReaderTest, OpenReaderPushesMultiColumnConjunctToParquetReader) {
