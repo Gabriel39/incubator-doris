@@ -183,10 +183,7 @@ public:
         DORIS_CHECK(indices != nullptr);
         const size_t num_dictionary_values = dictionary_size();
         if (_is_fragmented_selection(selection)) {
-            RETURN_IF_ERROR(_decode_fragmented_selection(selection, num_dictionary_values));
-            indices->assign(_skip_indices.begin(),
-                            _skip_indices.begin() + selection.selected_values);
-            return Status::OK();
+            return _decode_fragmented_selection(selection, num_dictionary_values, indices);
         }
         indices->resize(selection.selected_values);
         size_t cursor = 0;
@@ -230,8 +227,9 @@ public:
                                              ParquetDictionaryValueConsumer& consumer) override {
         const size_t num_dictionary_values = dictionary_size();
         if (_is_fragmented_selection(selection)) {
-            RETURN_IF_ERROR(_decode_fragmented_selection(selection, num_dictionary_values));
-            return consumer.consume_indices(_skip_indices.data(), selection.selected_values);
+            RETURN_IF_ERROR(_decode_fragmented_selection(selection, num_dictionary_values,
+                                                         &_selected_indices));
+            return consumer.consume_indices(_selected_indices.data(), selection.selected_values);
         }
         size_t cursor = 0;
         for (const auto& range : selection.ranges) {
@@ -249,60 +247,84 @@ public:
 
     void release_scratch(size_t max_retained_bytes) override {
         release_vector_if_oversized(&_skip_indices, max_retained_bytes);
+        release_vector_if_oversized(&_selected_indices, max_retained_bytes);
     }
     size_t retained_scratch_bytes() const override {
-        return _skip_indices.capacity() * sizeof(uint32_t);
+        return (_skip_indices.capacity() + _selected_indices.capacity()) * sizeof(uint32_t);
     }
-    size_t active_scratch_bytes() const override { return _skip_indices.size() * sizeof(uint32_t); }
+    size_t active_scratch_bytes() const override {
+        return (_skip_indices.size() + _selected_indices.size()) * sizeof(uint32_t);
+    }
 
 protected:
     static bool _is_fragmented_selection(const ParquetSelection& selection) {
         constexpr size_t MIN_FRAGMENTED_RANGES = 8;
+        constexpr size_t HIGHLY_FRAGMENTED_RANGES = 64;
         constexpr size_t MAX_AVERAGE_RANGE_VALUES = 4;
         constexpr size_t MAX_DECODE_EXPANSION = 8;
         return selection.ranges.size() >= MIN_FRAGMENTED_RANGES && selection.selected_values != 0 &&
-               selection.total_values / selection.selected_values <= MAX_DECODE_EXPANSION &&
-               selection.selected_values <= selection.ranges.size() * MAX_AVERAGE_RANGE_VALUES;
+               selection.selected_values <= selection.ranges.size() * MAX_AVERAGE_RANGE_VALUES &&
+               (selection.ranges.size() >= HIGHLY_FRAGMENTED_RANGES ||
+                selection.total_values / selection.selected_values <= MAX_DECODE_EXPANSION);
     }
 
     Status _decode_fragmented_selection(const ParquetSelection& selection,
-                                        size_t num_dictionary_values) {
-        // Decode and validate the page batch once when predicate survivors alternate in tiny runs.
-        // Walking each range separately turns one RLE batch into millions of decoder calls for
-        // low-cardinality predicates such as TPC-DS quantity buckets.
-        _skip_indices.resize(selection.total_values);
-        const auto decoded = _index_batch_decoder->GetBatch(
-                _skip_indices.data(), cast_set<uint32_t>(selection.total_values));
-        if (UNLIKELY(decoded != selection.total_values)) {
-            return Status::IOError("Can't read enough Parquet dictionary indices");
-        }
-        if (UNLIKELY(!dictionary_indices_in_bounds(_skip_indices.data(), selection.total_values,
-                                                   num_dictionary_values))) {
-            for (size_t row = 0; row < selection.total_values; ++row) {
-                if (_skip_indices[row] < num_dictionary_values) {
-                    continue;
-                }
-                return Status::Corruption(
-                        "Parquet dictionary index {} at row {} exceeds dictionary size {}",
-                        _skip_indices[row], row, num_dictionary_values);
-            }
-        }
+                                        size_t num_dictionary_values,
+                                        std::vector<uint32_t>* selected_indices) {
+        DORIS_CHECK(selected_indices != nullptr);
+        constexpr size_t kDecodeBatchSize = 4096;
+        selected_indices->resize(selection.selected_values);
+        _skip_indices.resize(std::min(selection.total_values, kDecodeBatchSize));
+
+        size_t chunk_first = 0;
         size_t output = 0;
-        constexpr size_t MAX_INLINE_COPY_VALUES = 4;
-        for (const auto& range : selection.ranges) {
-            DORIS_CHECK(range.first + range.count <= selection.total_values);
-            // Alternating predicates mostly produce one-row spans; inline tiny forward copies so
-            // range compaction does not replace decoder calls with equally numerous libc calls.
-            if (range.count <= MAX_INLINE_COPY_VALUES) {
-                for (size_t row = 0; row < range.count; ++row) {
-                    _skip_indices[output + row] = _skip_indices[range.first + row];
-                }
-            } else {
-                memmove(_skip_indices.data() + output, _skip_indices.data() + range.first,
-                        range.count * sizeof(uint32_t));
+        size_t range_index = 0;
+        while (chunk_first < selection.total_values) {
+            const size_t chunk_size =
+                    std::min(selection.total_values - chunk_first, kDecodeBatchSize);
+            const size_t chunk_end = chunk_first + chunk_size;
+            const auto decoded = _index_batch_decoder->GetBatch(_skip_indices.data(),
+                                                                cast_set<uint32_t>(chunk_size));
+            if (UNLIKELY(decoded != chunk_size)) {
+                return Status::IOError("Can't read enough Parquet dictionary indices");
             }
-            output += range.count;
+            if (UNLIKELY(!dictionary_indices_in_bounds(_skip_indices.data(), chunk_size,
+                                                       num_dictionary_values))) {
+                for (size_t row = 0; row < chunk_size; ++row) {
+                    if (_skip_indices[row] < num_dictionary_values) {
+                        continue;
+                    }
+                    return Status::Corruption(
+                            "Parquet dictionary index {} at row {} exceeds dictionary size {}",
+                            _skip_indices[row], chunk_first + row, num_dictionary_values);
+                }
+            }
+
+            // Filtered ids remain validated above. Gather with a range cursor so fragmented
+            // selections do not re-enter the RLE decoder for every survivor while scratch stays
+            // bounded independently of the Parquet page size.
+            while (range_index < selection.ranges.size()) {
+                const auto& range = selection.ranges[range_index];
+                DORIS_CHECK(range.first + range.count <= selection.total_values);
+                if (range.first >= chunk_end) {
+                    break;
+                }
+                const size_t copy_first = std::max(range.first, chunk_first);
+                const size_t copy_end = std::min(range.first + range.count, chunk_end);
+                DORIS_CHECK(copy_end >= copy_first);
+                const size_t copy_count = copy_end - copy_first;
+                memcpy(selected_indices->data() + output,
+                       _skip_indices.data() + copy_first - chunk_first,
+                       copy_count * sizeof(uint32_t));
+                output += copy_count;
+                if (range.first + range.count > chunk_end) {
+                    break;
+                }
+                ++range_index;
+            }
+            chunk_first = chunk_end;
         }
+        DORIS_CHECK_EQ(range_index, selection.ranges.size());
         DORIS_CHECK_EQ(output, selection.selected_values);
         return Status::OK();
     }
@@ -400,6 +422,7 @@ protected:
     DorisUniqueBufferPtr<uint8_t> _dict;
     std::unique_ptr<RleBatchDecoder<uint32_t>> _index_batch_decoder;
     std::vector<uint32_t> _skip_indices;
+    std::vector<uint32_t> _selected_indices;
     uint64_t _dictionary_generation = 0;
 };
 

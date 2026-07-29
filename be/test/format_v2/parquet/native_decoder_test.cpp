@@ -402,6 +402,68 @@ TEST(ParquetV2NativeDecoderTest, HighlySparseDictionarySelectionAvoidsFullBatchD
     EXPECT_EQ(consumer.indices, std::vector<uint32_t>(selection.selected_values, 0));
 }
 
+TEST(ParquetV2NativeDecoderTest, HighlyFragmentedSparseDictionarySelectionUsesChunkedDecode) {
+    constexpr size_t DICTIONARY_SIZE = 32;
+    constexpr size_t VALUE_COUNT = 8192;
+    std::array<int32_t, DICTIONARY_SIZE> dictionary_values {};
+    std::iota(dictionary_values.begin(), dictionary_values.end(), 0);
+    auto dictionary = make_unique_buffer<uint8_t>(sizeof(dictionary_values));
+    memcpy(dictionary.get(), dictionary_values.data(), sizeof(dictionary_values));
+
+    std::unique_ptr<Decoder> decoder;
+    ASSERT_TRUE(
+            Decoder::get_decoder(tparquet::Type::INT32, tparquet::Encoding::RLE_DICTIONARY, decoder)
+                    .ok());
+    decoder->set_type_length(sizeof(int32_t));
+    ASSERT_TRUE(decoder->set_dict(dictionary, sizeof(dictionary_values), DICTIONARY_SIZE).ok());
+
+    faststring encoded_ids;
+    RleEncoder<uint32_t> encoder(&encoded_ids, 5);
+    for (uint32_t row = 0; row < VALUE_COUNT; ++row) {
+        encoder.Put(row % DICTIONARY_SIZE);
+    }
+    encoder.Flush();
+    std::vector<uint8_t> payload(encoded_ids.size() + 1);
+    payload[0] = 5;
+    memcpy(payload.data() + 1, encoded_ids.data(), encoded_ids.size());
+    Slice data(payload.data(), payload.size());
+    ASSERT_TRUE(decoder->set_data(&data).ok());
+
+    ParquetSelection selection {
+            .total_values = VALUE_COUNT, .selected_values = VALUE_COUNT / 16, .ranges = {}};
+    std::vector<uint32_t> expected;
+    for (uint32_t row = 0; row < VALUE_COUNT; row += 16) {
+        selection.ranges.push_back({.first = row, .count = 1});
+        expected.push_back(row % DICTIONARY_SIZE);
+    }
+    CaptureDictionaryConsumer consumer;
+    ASSERT_TRUE(decoder->decode_selected_dictionary_values(selection, consumer).ok());
+
+    EXPECT_EQ(consumer.consume_calls, 1);
+    EXPECT_EQ(consumer.indices, expected);
+    EXPECT_LE(decoder->active_scratch_bytes(),
+              (4096 + selection.selected_values) * sizeof(uint32_t));
+
+    ASSERT_TRUE(decoder->set_data(&data).ok());
+    std::vector<uint32_t> selected_indices;
+    ASSERT_TRUE(decoder->decode_selected_dictionary_indices(selection, &selected_indices).ok());
+    EXPECT_EQ(selected_indices, expected);
+
+    faststring corrupt_encoded_ids;
+    RleEncoder<uint32_t> corrupt_encoder(&corrupt_encoded_ids, 6);
+    for (uint32_t row = 0; row < VALUE_COUNT; ++row) {
+        corrupt_encoder.Put(row == 1 ? DICTIONARY_SIZE : row % DICTIONARY_SIZE);
+    }
+    corrupt_encoder.Flush();
+    std::vector<uint8_t> corrupt_payload(corrupt_encoded_ids.size() + 1);
+    corrupt_payload[0] = 6;
+    memcpy(corrupt_payload.data() + 1, corrupt_encoded_ids.data(), corrupt_encoded_ids.size());
+    Slice corrupt_data(corrupt_payload.data(), corrupt_payload.size());
+    ASSERT_TRUE(decoder->set_data(&corrupt_data).ok());
+    EXPECT_TRUE(decoder->decode_selected_dictionary_indices(selection, &selected_indices)
+                        .is<ErrorCode::CORRUPTION>());
+}
+
 class ScriptedDictionaryMaterializationSource final : public ParquetDecodeSource {
 public:
     ScriptedDictionaryMaterializationSource(std::vector<uint32_t> ids, bool prefer_indices)
